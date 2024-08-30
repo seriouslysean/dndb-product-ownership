@@ -30,8 +30,6 @@ const productSelectors = [
     'a[data-testid^="product-detail-link-"]',
 ];
 
-const productSelectorsString = productSelectors.join(', ');
-
 const processNextProduct = async () => {
     if (productQueue.length === 0) {
         Logger.log('No more products to process.');
@@ -66,12 +64,10 @@ const processNextProduct = async () => {
     }
 };
 
-
 const getProductURLs = debounce(() => {
-    const productNodes = document.querySelectorAll(productSelectorsString);
-    const productUrls = [...new Set([...productNodes].map(tile => tile.href))];
-
-    const newUrls = productUrls.filter(url => !processedUrls.has(url));
+    const productNodes = document.querySelectorAll(productSelectors.join(', '));
+    const newUrls = [...new Set([...productNodes].map(tile => tile.href))]
+        .filter(url => !processedUrls.has(url));
 
     if (newUrls.length === 0) {
         Logger.log('No new products found');
@@ -89,13 +85,11 @@ const getProductURLs = debounce(() => {
 }, DEBOUNCE_DELAY);
 
 const initObserver = () => {
-    const observer = new MutationObserver((mutationsList) => {
+    const observer = new MutationObserver(mutationsList => {
         mutationsList.forEach(mutation => {
-            const hasRelevantChild = mutation.type === 'childList' && mutation.target.querySelector('[data-testid]');
-
-            if (!hasRelevantChild) return;
-
-            getProductURLs();
+            if (mutation.type === 'childList' && mutation.target.querySelector('[data-testid]')) {
+                getProductURLs();
+            }
         });
     });
 
