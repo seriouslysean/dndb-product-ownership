@@ -6,13 +6,20 @@
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://marketplace.dndbeyond.com/*"],
       "js": ["content.js"]
     }
+  ],
+  "host_permissions": [
+    "https://marketplace.dndbeyond.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
