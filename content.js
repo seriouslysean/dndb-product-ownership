@@ -24,7 +24,9 @@ const debounce = (fn, delay) => {
 };
 
 const productSelectors = [
+    // Carousels
     'a[data-testid^="sf-product-tile-"]',
+    // Product Tiles
     'a[data-testid^="product-detail-link-"]',
 ];
 
