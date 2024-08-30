@@ -24,14 +24,12 @@ const debounce = (fn, delay) => {
 };
 
 const productSelectors = [
-    // Carousels
     'a[data-testid^="sf-product-tile-"]',
-    // Product Tiles
     'a[data-testid^="product-detail-link-"]',
 ];
 
 const processNextProduct = async () => {
-    if (productQueue.length === 0) {
+    if (!productQueue.length) {
         Logger.log('No more products to process.');
         return;
     }
@@ -57,7 +55,6 @@ const processNextProduct = async () => {
         const logMsg = response.owned ? 'owned' : 'not owned';
         Logger.log(logMsg, { url });
 
-        // Process the next product after a delay
         setTimeout(processNextProduct, PROCESS_INTERVAL);
     } catch (error) {
         Logger.error('Error processing product', { url, error });
@@ -66,10 +63,10 @@ const processNextProduct = async () => {
 
 const getProductURLs = debounce(() => {
     const productNodes = document.querySelectorAll(productSelectors.join(', '));
-    const newUrls = [...new Set([...productNodes].map(tile => tile.href))]
+    const newUrls = [...new Set([...productNodes].map(({ href }) => href))]
         .filter(url => !processedUrls.has(url));
 
-    if (newUrls.length === 0) {
+    if (!newUrls.length) {
         Logger.log('No new products found');
         return;
     }
@@ -79,15 +76,17 @@ const getProductURLs = debounce(() => {
         productQueue.push(url);
     });
 
-    if (productQueue.length > 0 && productQueue.length === newUrls.length) {
-        processNextProduct();
+    if (productQueue.length !== newUrls.length) {
+        return;
     }
+
+    processNextProduct();
 }, DEBOUNCE_DELAY);
 
 const initObserver = () => {
     const observer = new MutationObserver(mutationsList => {
-        mutationsList.forEach(mutation => {
-            if (mutation.type === 'childList' && mutation.target.querySelector('[data-testid]')) {
+        mutationsList.forEach(({ type, target }) => {
+            if (type === 'childList' && target.querySelector('[data-testid]')) {
                 getProductURLs();
             }
         });
