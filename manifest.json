@@ -4,20 +4,12 @@
   "version": "0.1.0",
   "description": "Chrome extension to show if you own products on the D&D Beyond marketplace.",
   "permissions": [
-    "activeTab",
-    "storage",
-    "scripting",
-    "tabs"
+    "webRequest",
+    "storage"
   ],
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["https://marketplace.dndbeyond.com/*"],
-      "js": ["content.js"]
-    }
-  ],
   "host_permissions": [
     "https://marketplace.dndbeyond.com/*"
   ],
@@ -28,5 +20,11 @@
       "48": "assets/icon-48.png",
       "128": "assets/icon-128.png"
     }
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://marketplace.dndbeyond.com/*"],
+      "js": ["content.js"]
+    }
+  ]
 }
