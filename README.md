@@ -1,7 +1,5 @@
 # D&D Beyond Product Ownership
 
-![D&D Beyond Ownership](dndb-product-ownership.png)
-
 Chrome extension that shows which D&D Beyond marketplace products you don't own yet. Opens as a side panel so you can browse and click through to products without losing your place.
 
 ## Features
