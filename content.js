@@ -224,21 +224,70 @@ const fetchOwnershipFromLicensesPage = async () => {
     }
 };
 
+const fetchOwnershipFromOrders = async () => {
+    try {
+        const token = getAuthToken();
+        if (!token) return [];
+
+        const ids = [];
+        let offset = 0;
+        const limit = 100;
+
+        // Paginate through all orders
+        while (true) {
+            const response = await fetch(
+                `/mobify/proxy/ocapi/s/${API_SITE}/dw/shop/v21_3/custom_objects/CustomAPI/GetOrderHistory?offset=${offset}&limit=${limit}&refineBy={}`,
+                { headers: { Authorization: token, 'Content-Type': 'application/json' } }
+            );
+            if (!response.ok) break;
+
+            const { c_result } = await response.json();
+            const orders = c_result?.orders || [];
+            if (orders.length === 0) break;
+
+            for (const order of orders) {
+                for (const key of Object.keys(order)) {
+                    if (!key.includes('GroupItems')) continue;
+                    const groups = order[key];
+                    if (!Array.isArray(groups)) continue;
+                    for (const group of groups) {
+                        for (const item of group?.orderItems?.orderItems || []) {
+                            if (item.sfccProductId) ids.push(item.sfccProductId);
+                        }
+                    }
+                }
+            }
+
+            if (orders.length < limit) break;
+            offset += limit;
+            await delay(BATCH_DELAY_MS);
+        }
+
+        Logger.log('Order history:', ids.length, 'ordered product IDs');
+        return [...new Set(ids)];
+    } catch (e) {
+        Logger.warn('Order history fetch failed:', e.message);
+        return [];
+    }
+};
+
 const fetchOwnershipData = async () => {
     const results = await Promise.allSettled([
         fetchOwnershipFromApi(),
         fetchOwnershipFromLicensesPage(),
+        fetchOwnershipFromOrders(),
     ]);
 
     const apiIds = results[0].status === 'fulfilled' ? results[0].value : [];
     const licensesPage = results[1].status === 'fulfilled' ? results[1].value : { ids: [], names: [] };
+    const orderIds = results[2].status === 'fulfilled' ? results[2].value : [];
 
-    const mergedIds = [...new Set([...apiIds, ...licensesPage.ids])];
+    const mergedIds = [...new Set([...apiIds, ...licensesPage.ids, ...orderIds])];
     const licenseNames = new Set(licensesPage.names.map(normalizeName));
 
     if (mergedIds.length === 0 && licenseNames.size === 0) return null;
 
-    Logger.log(`Ownership: ${apiIds.length} API + ${licensesPage.ids.length} licenses page = ${mergedIds.length} unique IDs, ${licenseNames.size} names`);
+    Logger.log(`Ownership: ${apiIds.length} API + ${licensesPage.ids.length} licenses + ${orderIds.length} orders = ${mergedIds.length} unique IDs, ${licenseNames.size} names`);
 
     await chrome.storage.local.set({
         [STORAGE_KEY]: mergedIds,

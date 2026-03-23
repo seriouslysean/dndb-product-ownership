@@ -33,5 +33,7 @@ const endpoints = {
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const BATCH_DELAY_MS = 300;
 
+const STORAGE_KEY_FILTER_PREFS = 'dndbpo-filter-prefs';
+
 const ERROR_NOT_AUTHENTICATED = 'NOT_AUTHENTICATED';
 const ERROR_FETCH_FAILED = 'FETCH_FAILED';

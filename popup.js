@@ -9,7 +9,7 @@ const syncingGate = document.getElementById('syncing-gate');
 const mainContent = document.getElementById('main-content');
 
 let currentData = null;
-const activeFilters = new Set();
+let hiddenCategories = new Set(); // Categories the user has opted to hide
 
 // --- Category Config (single source of truth) ---
 
@@ -32,6 +32,18 @@ const categorizeProduct = (product) => {
 const badgeClassFor = (category) =>
     CATEGORIES.find(c => c.key === category)?.badge || 'other';
 
+// --- Saved Filter Preferences ---
+
+const loadFilterPrefs = async () => {
+    const result = await chrome.storage.local.get(STORAGE_KEY_FILTER_PREFS);
+    const prefs = result[STORAGE_KEY_FILTER_PREFS];
+    if (Array.isArray(prefs)) hiddenCategories = new Set(prefs);
+};
+
+const saveFilterPrefs = () => {
+    chrome.storage.local.set({ [STORAGE_KEY_FILTER_PREFS]: [...hiddenCategories] });
+};
+
 // --- View State ---
 
 const showView = (view) => {
@@ -42,7 +54,7 @@ const showView = (view) => {
 
 // --- Rendering ---
 
-const renderFilters = (groups, nonEmptyCount) => {
+const renderFilters = (groups) => {
     filtersEl.innerHTML = '';
 
     for (const { key } of CATEGORIES) {
@@ -50,11 +62,17 @@ const renderFilters = (groups, nonEmptyCount) => {
         if (count === 0) continue;
 
         const chip = document.createElement('button');
-        chip.className = `filter-chip${activeFilters.size > 0 && !activeFilters.has(key) ? ' inactive' : ''}`;
+        const isHidden = hiddenCategories.has(key);
+        chip.className = `filter-chip${isHidden ? ' inactive' : ''}`;
         chip.textContent = `${key} (${count})`;
+        chip.title = isHidden ? `Show ${key}` : `Hide ${key}`;
         chip.addEventListener('click', () => {
-            activeFilters.has(key) ? activeFilters.delete(key) : activeFilters.add(key);
-            if (activeFilters.size === nonEmptyCount) activeFilters.clear();
+            if (hiddenCategories.has(key)) {
+                hiddenCategories.delete(key);
+            } else {
+                hiddenCategories.add(key);
+            }
+            saveFilterPrefs();
             render(currentData);
         });
         filtersEl.appendChild(chip);
@@ -68,7 +86,6 @@ const render = (data) => {
 
     if (!data) { showView('login'); return; }
     if (data.syncing) { showView('syncing'); return; }
-
     if (data.errorCode === ERROR_NOT_AUTHENTICATED) { showView('login'); return; }
     if (data.errorCode) {
         showView('main');
@@ -93,18 +110,20 @@ const render = (data) => {
         (groups[cat] ??= []).push(product);
     }
 
-    const nonEmptyCount = Object.values(groups).filter(g => g.length > 0).length;
-    renderFilters(groups, nonEmptyCount);
-
-    const visibleCategories = activeFilters.size > 0
-        ? CATEGORIES.filter(c => activeFilters.has(c.key))
-        : CATEGORIES;
+    renderFilters(groups);
 
     let visibleCount = 0;
+    let hiddenCount = 0;
 
-    for (const { key } of visibleCategories) {
+    for (const { key } of CATEGORIES) {
         const group = groups[key];
         if (!group?.length) continue;
+
+        if (hiddenCategories.has(key)) {
+            hiddenCount += group.length;
+            continue;
+        }
+
         visibleCount += group.length;
 
         const header = document.createElement('div');
@@ -154,8 +173,10 @@ const render = (data) => {
         }
     }
 
-    const filterNote = activeFilters.size > 0 ? ` (showing ${visibleCount})` : '';
-    summaryEl.textContent = `${products.length} not owned, ${data.ownedCount} owned of ${data.totalCatalog}${filterNote}`;
+    const parts = [`${products.length} not owned, ${data.ownedCount} owned of ${data.totalCatalog}`];
+    if (hiddenCount > 0) parts.push(`${hiddenCount} hidden`);
+    if (visibleCount !== products.length && visibleCount > 0) parts.push(`showing ${visibleCount}`);
+    summaryEl.textContent = parts.join(' · ');
 
     if (data.lastUpdated) {
         lastUpdatedEl.textContent = `Updated ${new Date(data.lastUpdated).toLocaleString()}`;
@@ -201,7 +222,11 @@ chrome.storage.onChanged.addListener((changes) => {
     }
 });
 
-chrome.storage.local.get(STORAGE_KEY_NOT_OWNED, (result) => {
+// --- Init ---
+
+(async () => {
+    await loadFilterPrefs();
+    const result = await chrome.storage.local.get(STORAGE_KEY_NOT_OWNED);
     currentData = result[STORAGE_KEY_NOT_OWNED] || null;
     render(currentData);
-});
+})();
