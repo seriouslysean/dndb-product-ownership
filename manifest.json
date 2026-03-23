@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "D&D Beyond Product Ownership",
   "version": "1.0.0",
-  "description": "Chrome extension to show if you own products on the D&D Beyond marketplace.",
+  "description": "Chrome extension that shows which D&D Beyond marketplace products you don't own yet.",
   "permissions": [
     "storage",
     "tabs",
