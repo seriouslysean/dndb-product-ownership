@@ -4,7 +4,6 @@
   "version": "0.1.0",
   "description": "Chrome extension to show if you own products on the D&D Beyond marketplace.",
   "permissions": [
-    "webRequest",
     "storage",
     "tabs",
     "sidePanel"
