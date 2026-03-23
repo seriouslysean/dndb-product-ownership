@@ -1,6 +1,7 @@
 const summaryEl = document.getElementById('summary');
 const listEl = document.getElementById('product-list');
 const filtersEl = document.getElementById('filters');
+const formatToggleEl = document.getElementById('format-toggle');
 const lastUpdatedEl = document.getElementById('last-updated');
 const refreshBtn = document.getElementById('refresh-btn');
 const loginGate = document.getElementById('login-gate');
@@ -9,7 +10,14 @@ const syncingGate = document.getElementById('syncing-gate');
 const mainContent = document.getElementById('main-content');
 
 let currentData = null;
-let hiddenCategories = new Set(); // Categories the user has opted to hide
+let hiddenCategories = new Set();
+let formatFilter = 'digital'; // 'all', 'digital', 'physical'
+
+const FORMAT_OPTIONS = [
+    { key: 'digital', label: 'Digital' },
+    { key: 'physical', label: 'Physical' },
+    { key: 'all', label: 'All' },
+];
 
 // --- Category Config (single source of truth) ---
 
@@ -37,11 +45,23 @@ const badgeClassFor = (category) =>
 const loadFilterPrefs = async () => {
     const result = await chrome.storage.local.get(STORAGE_KEY_FILTER_PREFS);
     const prefs = result[STORAGE_KEY_FILTER_PREFS];
-    if (Array.isArray(prefs)) hiddenCategories = new Set(prefs);
+    if (prefs) {
+        if (Array.isArray(prefs)) {
+            hiddenCategories = new Set(prefs);
+        } else {
+            hiddenCategories = new Set(prefs.hiddenCategories || []);
+            formatFilter = prefs.format || 'digital';
+        }
+    }
 };
 
 const saveFilterPrefs = () => {
-    chrome.storage.local.set({ [STORAGE_KEY_FILTER_PREFS]: [...hiddenCategories] });
+    chrome.storage.local.set({
+        [STORAGE_KEY_FILTER_PREFS]: {
+            hiddenCategories: [...hiddenCategories],
+            format: formatFilter,
+        },
+    });
 };
 
 // --- View State ---
@@ -53,6 +73,29 @@ const showView = (view) => {
 };
 
 // --- Rendering ---
+
+const renderFormatToggle = () => {
+    formatToggleEl.innerHTML = '';
+    for (const { key, label } of FORMAT_OPTIONS) {
+        const btn = document.createElement('button');
+        btn.className = `format-btn${formatFilter === key ? ' active' : ''}`;
+        btn.textContent = label;
+        btn.addEventListener('click', () => {
+            formatFilter = key;
+            saveFilterPrefs();
+            render(currentData);
+        });
+        formatToggleEl.appendChild(btn);
+    }
+};
+
+const matchesFormat = (product) => {
+    if (formatFilter === 'all') return true;
+    const f = product.format || 'digital';
+    if (formatFilter === 'digital') return f === 'digital' || f === 'both';
+    if (formatFilter === 'physical') return f === 'physical' || f === 'both';
+    return true;
+};
 
 const renderFilters = (groups) => {
     filtersEl.innerHTML = '';
@@ -97,10 +140,18 @@ const render = (data) => {
     showView('main');
     summaryEl.style.color = '';
 
-    const products = data.products || [];
+    const allProducts = data.products || [];
+    const products = allProducts.filter(matchesFormat);
+
+    renderFormatToggle();
+
+    if (allProducts.length === 0) {
+        summaryEl.textContent = `You own everything! (${data.ownedCount} of ${data.totalCatalog})`;
+        return;
+    }
 
     if (products.length === 0) {
-        summaryEl.textContent = `You own everything! (${data.ownedCount} of ${data.totalCatalog})`;
+        summaryEl.textContent = `No ${formatFilter} products to show (${allProducts.length} total not owned)`;
         return;
     }
 

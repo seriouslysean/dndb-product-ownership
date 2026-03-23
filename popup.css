@@ -64,12 +64,54 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.filter-bar {
+  border-bottom: 1px solid #2a2a3e;
+  flex-shrink: 0;
+}
+
+.format-toggle {
+  display: flex;
+  gap: 0;
+  padding: 8px 16px 4px;
+}
+
+.format-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid #444;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.format-btn:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.format-btn:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.format-btn:not(:first-child) {
+  border-left: none;
+}
+
+.format-btn.active {
+  background: #2a2a3e;
+  color: #e0e0e0;
+  border-color: #666;
+}
+
+.format-btn:hover:not(.active) {
+  background: #222236;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 8px 16px;
-  border-bottom: 1px solid #2a2a3e;
+  padding: 4px 16px 8px;
 }
 
 .filter-chip {

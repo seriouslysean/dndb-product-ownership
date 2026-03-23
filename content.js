@@ -86,9 +86,11 @@ const fetchCatalog = async (forceRefresh = false) => {
                 id: v.productId,
                 values: v.variationValues,
             }));
-            entry.hasDigitalVariant = entry.variants.some(v =>
-                v.values?.['Digital/Physical'] === 'Digital'
-            );
+            const hasDigital = entry.variants.some(v => v.values?.['Digital/Physical'] === 'Digital');
+            const hasPhysical = entry.variants.some(v => v.values?.['Digital/Physical'] === 'Physical');
+            entry.format = hasDigital && hasPhysical ? 'both' : hasDigital ? 'digital' : hasPhysical ? 'physical' : 'digital';
+        } else {
+            entry.format = entry.isDigitalProduct === false ? 'physical' : 'digital';
         }
         if (product.setProducts) {
             entry.children = product.setProducts.map(sp => ({ id: sp.id, name: sp.name }));
@@ -150,8 +152,6 @@ const computeNotOwned = (catalog, { ids, names: licenseNames }) => {
     const notOwned = [];
 
     for (const product of catalog) {
-        if (product.isDigitalProduct === false && !product.hasDigitalVariant) continue;
-
         let isOwned = false;
 
         if (product.type === 'item') {
