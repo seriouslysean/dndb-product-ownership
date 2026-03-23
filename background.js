@@ -5,7 +5,7 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
 
 // Re-inject content scripts into existing marketplace tabs on install/update
 chrome.runtime.onInstalled.addListener(async () => {
-    const tabs = await chrome.tabs.query({ url: 'https://marketplace.dndbeyond.com/*' });
+    const tabs = await chrome.tabs.query({ url: `${MARKETPLACE_BASE}/*` });
     for (const tab of tabs) {
         chrome.scripting.executeScript({
             target: { tabId: tab.id },

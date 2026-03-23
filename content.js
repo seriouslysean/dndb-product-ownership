@@ -19,6 +19,35 @@ const apiFetch = async (url) => {
     return response.json();
 };
 
+// --- Batch Helpers ---
+
+const batchProcess = async (items, batchSize, fetchFn) => {
+    const results = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+        if (i > 0) await delay(BATCH_DELAY_MS);
+        const batch = items.slice(i, i + batchSize);
+        results.push({ batch, data: await fetchFn(batch) });
+    }
+    return results;
+};
+
+const paginateFetch = async (fetchPage) => {
+    const all = [];
+    let offset = 0;
+    const limit = 100;
+
+    while (true) {
+        const items = await fetchPage(offset, limit);
+        if (!items?.length) break;
+        all.push(...items);
+        if (items.length < limit) break;
+        offset += limit;
+        await delay(BATCH_DELAY_MS);
+    }
+
+    return all;
+};
+
 // --- Catalog Fetch ---
 
 const fetchCatalog = async (forceRefresh = false) => {
@@ -30,21 +59,19 @@ const fetchCatalog = async (forceRefresh = false) => {
         }
     }
 
-    Logger.log('Fetching product catalog...');
+    Logger.log('Fetching product catalog');
     const { hits = [] } = await apiFetch(endpoints.productSearch(200));
-    Logger.log(`Found ${hits.length} products`);
 
     const masters = [];
     const sets = [];
     const items = [];
 
-    for (const hit of hits) {
-        const { productType: type, productId: id, productName: name } = hit;
+    for (const { productType: type, productId: id, productName: name } of hits) {
         const entry = {
             id,
             name,
             type: type.master ? 'master' : type.set ? 'set' : type.variant ? 'variant' : 'item',
-            url: `https://marketplace.dndbeyond.com/category/${id}`,
+            url: endpoints.productPage(id),
         };
 
         if (type.master) masters.push(entry);
@@ -52,40 +79,37 @@ const fetchCatalog = async (forceRefresh = false) => {
         else if (!type.variant) items.push(entry);
     }
 
-    const allNonSets = [...masters, ...items];
-    for (let i = 0; i < allNonSets.length; i += 20) {
-        if (i > 0) await delay(BATCH_DELAY_MS);
-        const batch = allNonSets.slice(i, i + 20);
-        const { data = [] } = await apiFetch(endpoints.productDetails(batch.map(p => p.id)));
+    const enrichProduct = (entry, product) => {
+        entry.isDigitalProduct = product.c_isDigitalProduct ?? null;
+        if (entry.type === 'master') {
+            entry.variants = (product.variants || []).map(v => ({
+                id: v.productId,
+                values: v.variationValues,
+            }));
+            entry.hasDigitalVariant = entry.variants.some(v =>
+                v.values?.['Digital/Physical'] === 'Digital'
+            );
+        }
+        if (product.setProducts) {
+            entry.children = product.setProducts.map(sp => ({ id: sp.id, name: sp.name }));
+        }
+    };
 
+    for (const { batch, data } of await batchProcess([...masters, ...items], 20,
+        (b) => apiFetch(endpoints.productDetails(b.map(p => p.id))).then(r => r.data || [])
+    )) {
         for (const product of data) {
             const entry = batch.find(p => p.id === product.id);
-            if (!entry) continue;
-
-            entry.isDigitalProduct = product.c_isDigitalProduct ?? null;
-
-            if (entry.type === 'master') {
-                entry.variants = (product.variants || []).map(v => ({
-                    id: v.productId,
-                    values: v.variationValues,
-                }));
-                entry.hasDigitalVariant = entry.variants.some(v =>
-                    v.values?.['Digital/Physical'] === 'Digital'
-                );
-            }
+            if (entry) enrichProduct(entry, product);
         }
     }
 
-    for (let i = 0; i < sets.length; i += 10) {
-        if (i > 0) await delay(BATCH_DELAY_MS);
-        const batch = sets.slice(i, i + 10);
-        const { data = [] } = await apiFetch(endpoints.productDetails(batch.map(s => s.id), 'set_products'));
-
+    for (const { batch, data } of await batchProcess(sets, 10,
+        (b) => apiFetch(endpoints.productDetails(b.map(s => s.id), 'set_products')).then(r => r.data || [])
+    )) {
         for (const product of data) {
             const set = batch.find(s => s.id === product.id);
-            if (!set) continue;
-            set.children = (product.setProducts || []).map(sp => ({ id: sp.id, name: sp.name }));
-            set.isDigitalProduct = product.c_isDigitalProduct ?? null;
+            if (set) enrichProduct(set, product);
         }
     }
 
@@ -96,7 +120,7 @@ const fetchCatalog = async (forceRefresh = false) => {
         [STORAGE_KEY_LAST_CATALOG_FETCH]: Date.now(),
     });
 
-    Logger.log(`Catalog cached: ${catalog.length} products`);
+    Logger.log('Catalog cached', { count: catalog.length });
     return catalog;
 };
 
@@ -122,31 +146,31 @@ const isProductOwned = (productId, licensedIds, productName, licenseNames) => {
 
 const computeNotOwned = (catalog, { ids, names: licenseNames }) => {
     const licensedIds = new Set(ids);
+    const owned = (id, name) => isProductOwned(id, licensedIds, name, licenseNames);
     const notOwned = [];
 
     for (const product of catalog) {
         if (product.isDigitalProduct === false && !product.hasDigitalVariant) continue;
 
-        let owned = false;
+        let isOwned = false;
 
         if (product.type === 'item') {
-            owned = isProductOwned(product.id, licensedIds, product.name, licenseNames);
+            isOwned = owned(product.id, product.name);
         } else if (product.type === 'master') {
-            owned = isProductOwned(product.id, licensedIds, product.name, licenseNames)
-                || (product.variants || []).some(v => isProductOwned(v.id, licensedIds, null, null));
+            isOwned = owned(product.id, product.name)
+                || (product.variants || []).some(v => owned(v.id, null));
         } else if (product.type === 'set') {
-            owned = isProductOwned(product.id, licensedIds, product.name, licenseNames);
+            isOwned = owned(product.id, product.name);
 
-            if (!owned && product.children?.length > 0) {
+            if (!isOwned && product.children?.length > 0) {
                 const ownedChildren = [];
                 const missingChildren = [];
                 for (const child of product.children) {
-                    (isProductOwned(child.id, licensedIds, child.name, licenseNames)
-                        ? ownedChildren : missingChildren).push(child);
+                    (owned(child.id, child.name) ? ownedChildren : missingChildren).push(child);
                 }
 
                 if (missingChildren.length === 0) {
-                    owned = true;
+                    isOwned = true;
                 } else if (ownedChildren.length > 0) {
                     notOwned.push({
                         ...product,
@@ -159,13 +183,13 @@ const computeNotOwned = (catalog, { ids, names: licenseNames }) => {
             }
         }
 
-        if (!owned) notOwned.push(product);
+        if (!isOwned) notOwned.push(product);
     }
 
     return notOwned;
 };
 
-// --- Ownership Data Fetch ---
+// --- Ownership Data Sources ---
 
 const getCustomerIdFromToken = () => {
     const token = getAuthToken();
@@ -183,115 +207,100 @@ const getCustomerIdFromToken = () => {
 const fetchOwnershipFromApi = async () => {
     const customerId = getCustomerIdFromToken();
     if (!customerId) return [];
-
-    try {
-        const data = await apiFetch(
-            `${API_BASE}/customer/shopper-customers/v1/organizations/${API_ORG}/customers/${customerId}?siteId=${API_SITE}`
-        );
-        return data.c_productsLicensed || [];
-    } catch (e) {
-        Logger.warn('API ownership fetch failed:', e.message);
-        return [];
-    }
+    const data = await apiFetch(endpoints.customerProfile(customerId));
+    return data.c_productsLicensed || [];
 };
 
 const fetchOwnershipFromLicensesPage = async () => {
-    try {
-        const response = await fetch('https://www.dndbeyond.com/account/licenses', {
-            credentials: 'include',
-        });
-        if (!response.ok) return { ids: [], names: [] };
+    const response = await fetch(LICENSES_PAGE_URL, { credentials: 'include' });
+    if (!response.ok) throw new Error(`Licenses page ${response.status}`);
 
-        const html = await response.text();
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const rows = doc.querySelectorAll('table tbody tr');
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
 
-        const ids = [];
-        const names = [];
-        for (const row of rows) {
-            const cells = row.querySelectorAll('td');
-            const id = cells[0]?.textContent?.trim();
-            const name = cells[1]?.textContent?.trim();
-            if (id) ids.push(id);
-            if (name) names.push(name);
-        }
-
-        Logger.log('Licenses page:', ids.length, 'licenses');
-        return { ids, names };
-    } catch (e) {
-        Logger.warn('Licenses page fetch failed:', e.message);
-        return { ids: [], names: [] };
+    const ids = [];
+    const names = [];
+    for (const row of doc.querySelectorAll('table tbody tr')) {
+        const cells = row.querySelectorAll('td');
+        const id = cells[0]?.textContent?.trim();
+        const name = cells[1]?.textContent?.trim();
+        if (id) ids.push(id);
+        if (name) names.push(name);
     }
+
+    return { ids, names };
 };
 
 const fetchOwnershipFromOrders = async () => {
-    try {
-        const token = getAuthToken();
-        if (!token) return [];
+    const token = getAuthToken();
+    if (!token) return [];
 
+    return paginateFetch(async (offset, limit) => {
+        const response = await fetch(
+            endpoints.orderHistory(offset, limit),
+            { headers: { Authorization: token, 'Content-Type': 'application/json' } }
+        );
+        if (!response.ok) return [];
+
+        const { c_result } = await response.json();
         const ids = [];
-        let offset = 0;
-        const limit = 100;
-
-        // Paginate through all orders
-        while (true) {
-            const response = await fetch(
-                `/mobify/proxy/ocapi/s/${API_SITE}/dw/shop/v21_3/custom_objects/CustomAPI/GetOrderHistory?offset=${offset}&limit=${limit}&refineBy={}`,
-                { headers: { Authorization: token, 'Content-Type': 'application/json' } }
-            );
-            if (!response.ok) break;
-
-            const { c_result } = await response.json();
-            const orders = c_result?.orders || [];
-            if (orders.length === 0) break;
-
-            for (const order of orders) {
-                for (const key of Object.keys(order)) {
-                    if (!key.includes('GroupItems')) continue;
-                    const groups = order[key];
-                    if (!Array.isArray(groups)) continue;
-                    for (const group of groups) {
-                        for (const item of group?.orderItems?.orderItems || []) {
-                            if (item.sfccProductId) ids.push(item.sfccProductId);
-                        }
+        for (const order of c_result?.orders || []) {
+            for (const key of Object.keys(order)) {
+                if (!key.includes('GroupItems')) continue;
+                if (!Array.isArray(order[key])) continue;
+                for (const group of order[key]) {
+                    for (const item of group?.orderItems?.orderItems || []) {
+                        if (item.sfccProductId) ids.push(item.sfccProductId);
                     }
                 }
             }
-
-            if (orders.length < limit) break;
-            offset += limit;
-            await delay(BATCH_DELAY_MS);
         }
-
-        Logger.log('Order history:', ids.length, 'ordered product IDs');
-        return [...new Set(ids)];
-    } catch (e) {
-        Logger.warn('Order history fetch failed:', e.message);
-        return [];
-    }
+        return ids;
+    });
 };
 
+// --- Ownership Data Merge ---
+
+const OWNERSHIP_SOURCES = [
+    { name: 'api', fn: fetchOwnershipFromApi },
+    { name: 'licenses', fn: fetchOwnershipFromLicensesPage },
+    { name: 'orders', fn: fetchOwnershipFromOrders },
+];
+
 const fetchOwnershipData = async () => {
-    const results = await Promise.allSettled([
-        fetchOwnershipFromApi(),
-        fetchOwnershipFromLicensesPage(),
-        fetchOwnershipFromOrders(),
-    ]);
+    const results = await Promise.allSettled(OWNERSHIP_SOURCES.map(s => s.fn()));
 
-    const apiIds = results[0].status === 'fulfilled' ? results[0].value : [];
-    const licensesPage = results[1].status === 'fulfilled' ? results[1].value : { ids: [], names: [] };
-    const orderIds = results[2].status === 'fulfilled' ? results[2].value : [];
+    const resolved = OWNERSHIP_SOURCES.reduce((acc, source, i) => {
+        const result = results[i];
+        if (result.status === 'fulfilled') {
+            acc[source.name] = result.value;
+        } else {
+            Logger.warn('Ownership source failed', { source: source.name, error: result.reason?.message });
+            acc[source.name] = source.name === 'licenses' ? { ids: [], names: [] } : [];
+        }
+        return acc;
+    }, {});
 
-    const mergedIds = [...new Set([...apiIds, ...licensesPage.ids, ...orderIds])];
-    const licenseNames = new Set(licensesPage.names.map(normalizeName));
+    const mergedIds = [...new Set([
+        ...resolved.api,
+        ...resolved.licenses.ids,
+        ...resolved.orders,
+    ])];
+    const licenseNames = new Set(resolved.licenses.names.map(normalizeName));
 
     if (mergedIds.length === 0 && licenseNames.size === 0) return null;
 
-    Logger.log(`Ownership: ${apiIds.length} API + ${licensesPage.ids.length} licenses + ${orderIds.length} orders = ${mergedIds.length} unique IDs, ${licenseNames.size} names`);
+    Logger.log('Ownership data merged', {
+        api: resolved.api.length,
+        licenses: resolved.licenses.ids.length,
+        orders: resolved.orders.length,
+        total: mergedIds.length,
+        names: licenseNames.size,
+    });
 
     await chrome.storage.local.set({
         [STORAGE_KEY]: mergedIds,
-        [STORAGE_KEY_LICENSES_PAGE]: { ids: licensesPage.ids, names: [...licenseNames] },
+        [STORAGE_KEY_LICENSES_PAGE]: { ids: resolved.licenses.ids, names: [...licenseNames] },
     });
 
     return { ids: mergedIds, names: licenseNames };
@@ -314,7 +323,7 @@ const runPipeline = async (forceRefresh = false) => {
     pipelineRunning = true;
 
     try {
-        Logger.log('Running ownership pipeline...');
+        Logger.log('Pipeline started', { forceRefresh });
         await chrome.storage.local.set({ [STORAGE_KEY_NOT_OWNED]: { syncing: true } });
 
         const ownershipData = forceRefresh
@@ -331,7 +340,7 @@ const runPipeline = async (forceRefresh = false) => {
         const catalog = await fetchCatalog(forceRefresh);
         const notOwned = computeNotOwned(catalog, ownershipData);
 
-        Logger.log(`Pipeline complete: ${notOwned.length} not owned`);
+        Logger.log('Pipeline complete', { notOwned: notOwned.length, total: catalog.length });
         await chrome.storage.local.set({
             [STORAGE_KEY_NOT_OWNED]: {
                 products: notOwned,
@@ -341,7 +350,7 @@ const runPipeline = async (forceRefresh = false) => {
             },
         });
     } catch (error) {
-        Logger.error('Pipeline failed:', error);
+        Logger.error('Pipeline failed', error);
         await chrome.storage.local.set({
             [STORAGE_KEY_NOT_OWNED]: { errorCode: ERROR_FETCH_FAILED, errorMessage: error.message },
         });
@@ -349,8 +358,6 @@ const runPipeline = async (forceRefresh = false) => {
         pipelineRunning = false;
     }
 };
-
-// --- Message Handling (only first tab responds) ---
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'refresh') {

@@ -132,13 +132,13 @@ const render = (data) => {
         listEl.appendChild(header);
 
         for (const product of group) {
-            const url = product.url || `https://marketplace.dndbeyond.com/category/${product.id}`;
+            const url = product.url || endpoints.productPage(product.id);
             const entry = document.createElement('a');
             entry.className = 'product-entry';
             entry.href = url;
             entry.addEventListener('click', (e) => {
                 e.preventDefault();
-                if (url.startsWith('https://marketplace.dndbeyond.com/')) {
+                if (url.startsWith(MARKETPLACE_BASE)) {
                     chrome.tabs.create({ url });
                 }
             });
@@ -187,7 +187,7 @@ const render = (data) => {
 
 document.getElementById('open-marketplace').addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: 'https://marketplace.dndbeyond.com/' });
+    chrome.tabs.create({ url: `${MARKETPLACE_BASE}/` });
 });
 
 refreshBtn.addEventListener('click', async () => {
@@ -195,7 +195,7 @@ refreshBtn.addEventListener('click', async () => {
     refreshBtn.textContent = 'Refreshing...';
     showView('syncing');
 
-    const tabs = await chrome.tabs.query({ url: 'https://marketplace.dndbeyond.com/*' });
+    const tabs = await chrome.tabs.query({ url: `${MARKETPLACE_BASE}/*` });
 
     if (tabs.length === 0) {
         showView('login');

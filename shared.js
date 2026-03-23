@@ -15,6 +15,9 @@ const STORAGE_KEY_LICENSES_PAGE = 'dndbpo-licenses-page';
 const API_ORG = 'f_ecom_bfst_prd';
 const API_SITE = 'DDBUS';
 const API_BASE = '/mobify/proxy/api';
+const OCAPI_BASE = `/mobify/proxy/ocapi/s/${API_SITE}/dw/shop/v21_3`;
+const LICENSES_PAGE_URL = 'https://www.dndbeyond.com/account/licenses';
+const MARKETPLACE_BASE = 'https://marketplace.dndbeyond.com';
 
 const endpoints = {
     productSearch: (limit = 200) =>
@@ -28,6 +31,12 @@ const endpoints = {
         if (expand) params.set('expand', expand);
         return `${API_BASE}/product/shopper-products/v1/organizations/${API_ORG}/products?${params}`;
     },
+    customerProfile: (customerId) =>
+        `${API_BASE}/customer/shopper-customers/v1/organizations/${API_ORG}/customers/${customerId}?siteId=${API_SITE}`,
+    orderHistory: (offset, limit) =>
+        `${OCAPI_BASE}/custom_objects/CustomAPI/GetOrderHistory?offset=${offset}&limit=${limit}&refineBy={}`,
+    productPage: (productId) =>
+        `${MARKETPLACE_BASE}/category/${productId}`,
 };
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
