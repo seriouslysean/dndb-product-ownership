@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <h1>D&D Beyond Library</h1>
+    <p id="summary" class="summary"></p>
+  </div>
+
+  <div id="login-gate" class="gate" style="display:none">
+    <p>Open <a href="#" id="open-marketplace">marketplace.dndbeyond.com</a> and sign in to sync your library.</p>
+  </div>
+
+  <div id="syncing-gate" class="gate" style="display:none">
+    <div class="spinner"></div>
+    <p>Syncing your library...</p>
+  </div>
+
+  <div id="main-content" style="display:none">
+    <div id="filters" class="filters"></div>
+    <div id="product-list" class="product-list"></div>
+  </div>
+
+  <div class="footer">
+    <span id="last-updated" class="last-updated"></span>
+    <button id="refresh-btn" class="refresh-btn">Refresh</button>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

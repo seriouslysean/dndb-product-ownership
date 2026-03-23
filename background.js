@@ -1,16 +1,4 @@
-class Logger {
-    static #logWithLevel(level, ...messages) {
-        console[level]('[DNDBPO]:', ...messages);
-    }
-
-    static log(...messages) { this.#logWithLevel('log', ...messages); }
-    static warn(...messages) { this.#logWithLevel('warn', ...messages); }
-    static error(...messages) { this.#logWithLevel('error', ...messages); }
-}
-
-const ONE_DAY_MS = 24 * 60 * 60 * 1000; // One day in milliseconds
-const DNDBPO_HEADER_NAME = 'X-Dndb-Product-Ownership-Request';
-const STORAGE_KEY = 'dndbpo-product-ownership';
+importScripts('shared.js');
 
 const isTargetUrl = (url) => /https:\/\/marketplace\.dndbeyond\.com\/mobify\/proxy\/api\/customer\/shopper-customers\/v1\/organizations\/f_ecom_bfst_prd\/customers\/[^/]+\?siteId=DDBUS$/.test(url);
 
@@ -107,6 +95,9 @@ chrome.webRequest.onCompleted.addListener(
         urls: ["*://marketplace.dndbeyond.com/mobify/proxy/api/customer/shopper-customers/v1/organizations/f_ecom_bfst_prd/customers/*?siteId=DDBUS"]
     }
 );
+
+// Open side panel on extension icon click
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 // Debugging helper: Log when the background script is loaded
 Logger.log('Background script loaded');
