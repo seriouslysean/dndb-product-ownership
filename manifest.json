@@ -29,7 +29,7 @@
   "content_scripts": [
     {
       "matches": ["https://marketplace.dndbeyond.com/*"],
-      "js": ["shared.js", "content.js"]
+      "js": ["constants.js", "shared.js", "content.js"]
     }
   ]
 }

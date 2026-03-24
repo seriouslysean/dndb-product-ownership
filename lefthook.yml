@@ -1,0 +1,14 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint-js
+      glob: "*.js"
+      run: npx oxlint {staged_files}
+
+    - name: format-js
+      glob: "*.js"
+      run: npx oxfmt --check {staged_files}
+
+    - name: lint-css
+      glob: "*.css"
+      run: npx stylelint {staged_files}

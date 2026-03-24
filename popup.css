@@ -69,10 +69,15 @@ body {
   flex-shrink: 0;
 }
 
-.format-toggle {
+.toggle-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px 4px;
+}
+
+.toggle-group {
   display: flex;
   gap: 0;
-  padding: 8px 16px 4px;
 }
 
 .format-btn {
@@ -204,12 +209,35 @@ body {
   margin-top: 2px;
 }
 
-.type-badge.sourcebook { background: #2d5a27; color: #8fce87; }
-.type-badge.adventure { background: #5a3d27; color: #ceaa87; }
-.type-badge.dice { background: #27445a; color: #87b8ce; }
-.type-badge.map { background: #4a275a; color: #c087ce; }
-.type-badge.bundle { background: #5a2727; color: #ce8787; }
-.type-badge.other { background: #3a3a3a; color: #b0b0b0; }
+.type-badge.sourcebook {
+  background: #2d5a27;
+  color: #8fce87;
+}
+
+.type-badge.adventure {
+  background: #5a3d27;
+  color: #ceaa87;
+}
+
+.type-badge.dice {
+  background: #27445a;
+  color: #87b8ce;
+}
+
+.type-badge.map {
+  background: #4a275a;
+  color: #c087ce;
+}
+
+.type-badge.bundle {
+  background: #5a2727;
+  color: #ce8787;
+}
+
+.type-badge.other {
+  background: #3a3a3a;
+  color: #b0b0b0;
+}
 
 .footer {
   display: flex;
@@ -248,9 +276,11 @@ body {
 .product-list::-webkit-scrollbar {
   width: 6px;
 }
+
 .product-list::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .product-list::-webkit-scrollbar-thumb {
   background: #333;
   border-radius: 3px;
