@@ -200,17 +200,20 @@ const render = (data) => {
     syncingMessage.textContent = STAGE_LABELS[data.stage] || "Syncing...";
     return;
   }
-  if (data.errorCode === ERROR.NOT_AUTHENTICATED || data.errorCode === ERROR.TOKEN_EXPIRED) {
-    showView("login");
-    if (data.errorCode === ERROR.TOKEN_EXPIRED) {
-      loginMessage.textContent = "Session expired. Open the marketplace and sign in again.";
-    }
-    return;
-  }
   if (data.errorCode) {
-    showView("main");
-    summaryEl.textContent = data.errorMessage || "Something went wrong.";
-    summaryEl.style.color = "var(--color-text-error)";
+    showView("login");
+    const messages = {
+      [ERROR.NOT_AUTHENTICATED]:
+        'Open <a href="#" class="gate__link" id="open-marketplace">marketplace.dndbeyond.com</a> and sign in to sync your library.',
+      [ERROR.TOKEN_EXPIRED]: "Session expired. Open the marketplace and sign in again.",
+      [ERROR.FETCH_FAILED]: `Could not reach D&D Beyond. Check your connection and try again.`,
+    };
+    loginMessage.innerHTML = messages[data.errorCode] || "Something went wrong.";
+    // Re-bind the marketplace link if it was re-created via innerHTML
+    loginMessage.querySelector("#open-marketplace")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: `${MARKETPLACE_BASE}/` });
+    });
     return;
   }
 
@@ -397,12 +400,11 @@ chrome.storage.onChanged.addListener((changes) => {
   const result = await chrome.storage.local.get(STORAGE.NOT_OWNED);
   currentData = result[STORAGE.NOT_OWNED] || null;
 
-  // Don't show stale errors on open — show syncing and let the background update
-  if (currentData?.errorCode) {
+  // Retry transient errors automatically, but show auth errors immediately
+  if (currentData?.errorCode === ERROR.FETCH_FAILED) {
     currentData = { syncing: true, stage: SYNC_STAGE.STARTING };
     chrome.runtime.sendMessage({ action: "refresh" }, () => {
       if (chrome.runtime.lastError) {
-        // Background not available, show the actual error
         currentData = result[STORAGE.NOT_OWNED] || null;
         render(currentData);
       }
