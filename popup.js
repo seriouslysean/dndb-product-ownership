@@ -15,6 +15,7 @@ const loginMessage = document.getElementById("login-message");
 const syncingGate = document.getElementById("syncing-gate");
 const syncingMessage = document.getElementById("syncing-message");
 const mainContent = document.getElementById("main-content");
+const searchInput = document.getElementById("search-input");
 
 let currentData = null;
 let hiddenCategories = new Set();
@@ -22,6 +23,7 @@ let dismissedProducts = new Set();
 let formatFilter = FORMAT.DIGITAL;
 let publisherFilter = PUBLISHER.ALL;
 let settingsOpen = false;
+let searchQuery = "";
 
 const FORMAT_OPTIONS = [
   { key: FORMAT.DIGITAL, label: "Digital" },
@@ -63,8 +65,16 @@ const matchesPublisher = (product) => {
   return product.isFirstParty !== true;
 };
 
+const matchesSearch = (product) => {
+  if (!searchQuery) return true;
+  return (product.name || "").toLowerCase().includes(searchQuery);
+};
+
 const matchesFilters = (product) =>
-  matchesFormat(product) && matchesPublisher(product) && !dismissedProducts.has(product.id);
+  matchesFormat(product) &&
+  matchesPublisher(product) &&
+  matchesSearch(product) &&
+  !dismissedProducts.has(product.id);
 
 // --- Saved Preferences ---
 
@@ -104,25 +114,22 @@ const undismissAll = () => {
 // --- View State ---
 
 const showView = (view) => {
-  loginGate.style.display = view === "login" ? "" : "none";
-  syncingGate.style.display = view === "syncing" ? "" : "none";
-  mainContent.style.display = view === "main" ? "" : "none";
+  loginGate.hidden = view !== "login";
+  syncingGate.hidden = view !== "syncing";
+  mainContent.hidden = view !== "main";
 };
 
 // --- Settings Panel ---
 
 const renderSettings = (groups, data) => {
-  // Format toggle
   renderToggle(formatToggleEl, FORMAT_OPTIONS, formatFilter, (key) => {
     formatFilter = key;
   });
 
-  // Publisher toggle
   renderToggle(publisherToggleEl, PUBLISHER_OPTIONS, publisherFilter, (key) => {
     publisherFilter = key;
   });
 
-  // Category chips
   filtersEl.innerHTML = "";
   for (const { key } of DISPLAY_CATEGORIES) {
     const count = groups[key]?.length || 0;
@@ -130,7 +137,7 @@ const renderSettings = (groups, data) => {
 
     const isHidden = hiddenCategories.has(key);
     const chip = document.createElement("button");
-    chip.className = `filter-chip${isHidden ? " inactive" : ""}`;
+    chip.className = `filter__chip${isHidden ? " filter__chip--inactive" : ""}`;
     chip.textContent = `${key} (${count})`;
     chip.title = isHidden ? `Show ${key}` : `Hide ${key}`;
     chip.addEventListener("click", () => {
@@ -145,7 +152,6 @@ const renderSettings = (groups, data) => {
     filtersEl.appendChild(chip);
   }
 
-  // Stats
   if (data) {
     const allProducts = data.products || [];
     const lines = [
@@ -164,7 +170,7 @@ const renderToggle = (container, options, activeKey, onChange) => {
   container.innerHTML = "";
   for (const { key, label } of options) {
     const btn = document.createElement("button");
-    btn.className = `format-btn${activeKey === key ? " active" : ""}`;
+    btn.className = `toggle__btn${activeKey === key ? " toggle__btn--active" : ""}`;
     btn.textContent = label;
     btn.addEventListener("click", () => {
       onChange(key);
@@ -204,7 +210,7 @@ const render = (data) => {
   if (data.errorCode) {
     showView("main");
     summaryEl.textContent = data.errorMessage || "Something went wrong.";
-    summaryEl.style.color = "#e74c3c";
+    summaryEl.style.color = "var(--color-text-error)";
     return;
   }
 
@@ -232,7 +238,6 @@ const render = (data) => {
     (groups[cat] ??= []).push(product);
   }
 
-  // Render settings panel content (always, so it's ready when opened)
   renderSettings(groups, data);
 
   if (products.length === 0) {
@@ -255,17 +260,17 @@ const render = (data) => {
     visibleCount += group.length;
 
     const header = document.createElement("div");
-    header.className = "group-header";
+    header.className = "product-list__header";
     header.textContent = `${key} (${group.length})`;
     listEl.appendChild(header);
 
     for (const product of group) {
       const url = product.url || endpoints.productPage(product.id);
       const entry = document.createElement("div");
-      entry.className = "product-entry";
+      entry.className = "product";
 
       const link = document.createElement("a");
-      link.className = "product-link";
+      link.className = "product__link";
       link.href = url;
       link.addEventListener("click", (e) => {
         e.preventDefault();
@@ -273,14 +278,14 @@ const render = (data) => {
       });
 
       const nameEl = document.createElement("span");
-      nameEl.className = "product-name";
+      nameEl.className = "product__name";
       nameEl.textContent = product.name || "(unnamed)";
 
-      const priceEl = formatPrice(product.price);
-      if (priceEl) {
+      const priceText = formatPrice(product.price);
+      if (priceText) {
         const priceSpan = document.createElement("span");
-        priceSpan.className = "product-price";
-        priceSpan.textContent = priceEl;
+        priceSpan.className = "product__price";
+        priceSpan.textContent = priceText;
         nameEl.appendChild(priceSpan);
       }
 
@@ -290,7 +295,7 @@ const render = (data) => {
 
       if (relevantChildren.length > 0 && ownedCount > 0) {
         const note = document.createElement("span");
-        note.className = "product-note";
+        note.className = "product__note";
         note.textContent = ` (${ownedCount}/${relevantChildren.length} owned)`;
         nameEl.appendChild(note);
       }
@@ -298,7 +303,7 @@ const render = (data) => {
       if (missingChildren.length > 0) {
         for (const child of missingChildren) {
           const childEl = document.createElement("div");
-          childEl.className = "product-child-missing";
+          childEl.className = "product__child-missing";
           childEl.textContent = child.name || "(unnamed)";
           nameEl.appendChild(childEl);
         }
@@ -307,11 +312,11 @@ const render = (data) => {
       link.appendChild(nameEl);
 
       const badge = document.createElement("span");
-      badge.className = `type-badge ${badgeClassFor(key)}`;
+      badge.className = `badge badge--${badgeClassFor(key)}`;
       badge.textContent = key;
 
       const dismissBtn = document.createElement("button");
-      dismissBtn.className = "dismiss-btn";
+      dismissBtn.className = "product__dismiss";
       dismissBtn.textContent = "\u00d7";
       dismissBtn.title = "Not interested";
       dismissBtn.addEventListener("click", (e) => {
@@ -346,9 +351,16 @@ document.getElementById("undismiss-btn").addEventListener("click", undismissAll)
 
 settingsBtn.addEventListener("click", () => {
   settingsOpen = !settingsOpen;
-  settingsPanel.style.display = settingsOpen ? "" : "none";
-  settingsBtn.classList.toggle("active", settingsOpen);
+  settingsPanel.hidden = !settingsOpen;
+  settingsBtn.classList.toggle("footer__btn--active", settingsOpen);
 });
+
+if (searchInput) {
+  searchInput.addEventListener("input", (e) => {
+    searchQuery = e.target.value.toLowerCase().trim();
+    render(currentData);
+  });
+}
 
 refreshBtn.addEventListener("click", async () => {
   refreshBtn.disabled = true;
