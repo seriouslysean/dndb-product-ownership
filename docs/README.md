@@ -29,4 +29,5 @@ Chrome extension that shows which D&D Beyond marketplace products you don't own 
 
 ## Documentation
 
+- [Architecture](./architecture.md) - data flow, fetch patterns, pipeline stages, storage schema
 - [Ownership Resolution](./ownership-resolution.md) - how products are matched, categorized, and filtered

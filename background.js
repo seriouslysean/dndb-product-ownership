@@ -8,7 +8,7 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((e) => Logger.error("Failed to configure side panel", e));
 
-// --- Auth ---
+// --- Auth & Fetch ---
 
 const getAuthToken = async () => {
   const cookie = await chrome.cookies.get({
@@ -18,17 +18,30 @@ const getAuthToken = async () => {
   return cookie?.value ? decodeURIComponent(cookie.value).trim() : null;
 };
 
-const apiFetch = async (url) => {
-  const token = await getAuthToken();
-  if (!token) throw Object.assign(new Error("No auth token"), { isAuthError: true });
+// All external fetches in the background go through this.
+// Resolves relative paths, adds auth, checks response status.
+const bgFetch = async (url, { auth = true, ...options } = {}) => {
+  const fullUrl = url.startsWith("/") ? `${MARKETPLACE_BASE}${url}` : url;
 
-  const response = await fetch(url, { headers: { Authorization: token } });
+  if (auth) {
+    const token = await getAuthToken();
+    if (!token) throw Object.assign(new Error("No auth token"), { isAuthError: true });
+    options.headers = { ...options.headers, Authorization: token };
+  }
+
+  const response = await fetch(fullUrl, options);
 
   if (response.status === 401) {
     throw Object.assign(new Error("Token expired"), { isAuthError: true });
   }
-  if (!response.ok) throw new Error(`API ${response.status}`);
+  if (!response.ok) throw new Error(`${response.status} ${fullUrl}`);
 
+  return response;
+};
+
+// Convenience: bgFetch + parse JSON
+const apiFetch = async (url) => {
+  const response = await bgFetch(url);
   return response.json();
 };
 
@@ -290,8 +303,7 @@ const fetchOwnershipFromApi = async () => {
 };
 
 const fetchOwnershipFromLicensesPage = async () => {
-  const response = await fetch(LICENSES_PAGE_URL, { credentials: "include" });
-  if (!response.ok) throw new Error(`Licenses page ${response.status}`);
+  const response = await bgFetch(LICENSES_PAGE_URL, { auth: false, credentials: "include" });
 
   const html = await response.text();
   if (!html.includes("<table")) {
@@ -315,10 +327,10 @@ const fetchOwnershipFromOrders = async () => {
   if (!token) return [];
 
   return paginateFetch(async (offset, limit) => {
-    const response = await fetch(endpoints.orderHistory(offset, limit), {
-      headers: { Authorization: token, "Content-Type": "application/json" },
-    });
-    if (!response.ok) return [];
+    const response = await bgFetch(endpoints.orderHistory(offset, limit), {
+      headers: { "Content-Type": "application/json" },
+    }).catch(() => null);
+    if (!response) return [];
 
     const { c_result } = await response.json();
     const ids = [];
