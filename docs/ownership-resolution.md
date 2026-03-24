@@ -42,14 +42,13 @@ A `set` is fully owned if ALL its children (from `expand=set_products`) are owne
 
 Example: `core-rulebook-bundle` has 6 children (3 digital, 3 physical). In Digital mode, only the 3 digital children matter. See [fixtures/products.json](../fixtures/products.json) - `core-rulebook-bundle` entry.
 
-### 5. Name fallback
+### 5. ID alias (manual overrides)
 
-When no ID match is found, the product's normalized name is checked against normalized license names from the licenses page. Only matches if:
+Some products have different IDs in the marketplace catalog vs the licenses page. These are tracked in `id-aliases.json` as `{ catalogId: licenseId }` pairs.
 
-- Both normalized strings are 8+ characters
-- The catalog name contains the license name (one direction only)
+Example: `DCE-02101` (Elder Heart Digital Dice Set) in the catalog, but `DCE-02100` on the licenses page. The alias `"DCE-02101": "DCE-02100"` bridges the gap.
 
-This handles cases where the marketplace catalog ID doesn't match the license ID. Example: `DCE-02101` (Elder Heart Digital Dice Set) - the license page shows `DCE-02100` with name "Elder Heart". The ID doesn't match, but the name does. See [fixtures/products.json](../fixtures/products.json) - `DCE-02101` entry.
+This file exists because the two systems are out of sync for certain products. It should be re-evaluated periodically. If the mismatch is fixed upstream, remove the entry. If new mismatches appear, add them. Run `tools/fetch-fixtures.js` to compare catalog IDs against license IDs and identify gaps.
 
 ## Format Resolution
 

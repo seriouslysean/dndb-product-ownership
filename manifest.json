@@ -18,6 +18,12 @@
   "side_panel": {
     "default_path": "popup.html"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["id-aliases.json"],
+      "matches": ["https://marketplace.dndbeyond.com/*"]
+    }
+  ],
   "content_scripts": [
     {
       "matches": ["https://marketplace.dndbeyond.com/*"],

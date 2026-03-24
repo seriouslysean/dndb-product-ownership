@@ -15,7 +15,6 @@ const STORAGE = Object.freeze({
   CATALOG: "dndbpo-product-catalog",
   NOT_OWNED: "dndbpo-not-owned",
   LAST_CATALOG_FETCH: "dndbpo-last-catalog-fetch",
-  LICENSES_PAGE: "dndbpo-licenses-page",
   FILTER_PREFS: "dndbpo-filter-prefs",
   VERSION: "dndbpo-version",
 });

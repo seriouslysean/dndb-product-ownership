@@ -1,0 +1,4 @@
+{
+  "$schema": "Catalog ID → License ID overrides for known mismatches between the marketplace catalog and the dndbeyond.com/account/licenses page. Each entry exists because the two systems use different IDs for the same product. Re-evaluate periodically by running tools/fetch-fixtures.js and checking if the license page ID has been corrected.",
+  "DCE-02101": "DCE-02100"
+}

@@ -168,45 +168,54 @@ const fetchCatalog = async (forceRefresh = false) => {
   return catalog;
 };
 
+// --- ID Aliases ---
+
+// Loaded from id-aliases.json at startup. Maps catalog IDs to license IDs
+// for known mismatches between the marketplace and the licenses page.
+let idAliases = {};
+
+const loadIdAliases = async () => {
+  try {
+    const url = chrome.runtime.getURL("id-aliases.json");
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const { $schema, ...aliases } = data;
+    idAliases = aliases;
+    Logger.log("ID aliases loaded", { count: Object.keys(idAliases).length });
+  } catch (e) {
+    Logger.warn("Failed to load ID aliases", { error: e.message });
+  }
+};
+
 // --- Ownership Matching ---
 
-const normalizeName = (name) => (name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-
-const isProductOwned = (productId, licensedIds, productName, licenseNames) => {
-  if (licensedIds.has(productId) || licensedIds.has("DB" + productId)) return true;
-  // Name fallback: license names are often shorter than catalog names
-  // e.g. "Elder Heart" (license) vs "Elder Heart Digital Dice Set" (catalog)
-  if (productName && licenseNames?.size > 0) {
-    const normalized = normalizeName(productName);
-    if (normalized.length < 8) return false;
-    for (const licenseName of licenseNames) {
-      if (licenseName.length < 8) continue;
-      if (normalized.includes(licenseName)) return true;
-    }
-  }
+const isProductOwned = (productId, licensedIds) => {
+  if (licensedIds.has(productId)) return true;
+  if (licensedIds.has("DB" + productId)) return true;
+  const alias = idAliases[productId];
+  if (alias && licensedIds.has(alias)) return true;
   return false;
 };
 
-const computeNotOwned = (catalog, { ids, names: licenseNames }) => {
+const computeNotOwned = (catalog, { ids }) => {
   const licensedIds = new Set(ids);
-  const owned = (id, name) => isProductOwned(id, licensedIds, name, licenseNames);
+  const owned = (id) => isProductOwned(id, licensedIds);
   const notOwned = [];
 
   for (const product of catalog) {
     let isOwned = false;
 
     if (product.type === "item") {
-      isOwned = owned(product.id, product.name);
+      isOwned = owned(product.id);
     } else if (product.type === "master") {
-      isOwned =
-        owned(product.id, product.name) || (product.variants || []).some((v) => owned(v.id, null));
+      isOwned = owned(product.id) || (product.variants || []).some((v) => owned(v.id));
     } else if (product.type === "set") {
-      isOwned = owned(product.id, product.name);
+      isOwned = owned(product.id);
 
       if (!isOwned && product.children?.length > 0) {
         const taggedChildren = product.children.map((child) => ({
           ...child,
-          isOwned: owned(child.id, child.name),
+          isOwned: owned(child.id),
         }));
         const allOwned = taggedChildren.every((c) => c.isOwned);
         const someOwned = taggedChildren.some((c) => c.isOwned);
@@ -256,16 +265,12 @@ const fetchOwnershipFromLicensesPage = async () => {
   const doc = new DOMParser().parseFromString(html, "text/html");
 
   const ids = [];
-  const names = [];
   for (const row of doc.querySelectorAll("table tbody tr")) {
-    const cells = row.querySelectorAll("td");
-    const id = cells[0]?.textContent?.trim();
-    const name = cells[1]?.textContent?.trim();
+    const id = row.querySelector("td")?.textContent?.trim();
     if (id) ids.push(id);
-    if (name) names.push(name);
   }
 
-  return { ids, names };
+  return ids;
 };
 
 const fetchOwnershipFromOrders = async () => {
@@ -313,30 +318,25 @@ const fetchOwnershipData = async () => {
         source: source.name,
         error: result.reason?.message,
       });
-      acc[source.name] = source.name === "licenses" ? { ids: [], names: [] } : [];
+      acc[source.name] = [];
     }
     return acc;
   }, {});
 
-  const mergedIds = [...new Set([...resolved.api, ...resolved.licenses.ids, ...resolved.orders])];
-  const licenseNames = new Set(resolved.licenses.names.map(normalizeName));
+  const mergedIds = [...new Set([...resolved.api, ...resolved.licenses, ...resolved.orders])];
 
-  if (mergedIds.length === 0 && licenseNames.size === 0) return null;
+  if (mergedIds.length === 0) return null;
 
   Logger.log("Ownership data merged", {
     api: resolved.api.length,
-    licenses: resolved.licenses.ids.length,
+    licenses: resolved.licenses.length,
     orders: resolved.orders.length,
     total: mergedIds.length,
-    names: licenseNames.size,
   });
 
-  await chrome.storage.local.set({
-    [STORAGE.OWNERSHIP]: mergedIds,
-    [STORAGE.LICENSES_PAGE]: { ids: resolved.licenses.ids, names: [...licenseNames] },
-  });
+  await chrome.storage.local.set({ [STORAGE.OWNERSHIP]: mergedIds });
 
-  return { ids: mergedIds, names: licenseNames };
+  return { ids: mergedIds };
 };
 
 // --- Cache Versioning ---
@@ -353,7 +353,6 @@ const checkVersionChange = async () => {
       STORAGE.CATALOG,
       STORAGE.LAST_CATALOG_FETCH,
       STORAGE.OWNERSHIP,
-      STORAGE.LICENSES_PAGE,
       STORAGE.NOT_OWNED,
     ]);
     await chrome.storage.local.set({ [STORAGE.VERSION]: currentVersion });
@@ -365,10 +364,10 @@ const checkVersionChange = async () => {
 // --- Pipeline ---
 
 const loadStoredOwnership = async () => {
-  const stored = await chrome.storage.local.get([STORAGE.OWNERSHIP, STORAGE.LICENSES_PAGE]);
+  const stored = await chrome.storage.local.get(STORAGE.OWNERSHIP);
   const ids = stored[STORAGE.OWNERSHIP];
   if (!ids || !Array.isArray(ids)) return null;
-  return { ids, names: new Set(stored[STORAGE.LICENSES_PAGE]?.names || []) };
+  return { ids };
 };
 
 const runPipeline = async (forceRefresh = false) => {
@@ -431,4 +430,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-runPipeline();
+loadIdAliases().then(() => runPipeline());
