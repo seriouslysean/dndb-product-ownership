@@ -495,15 +495,16 @@ const runPipeline = async (forceRefresh = false) => {
 // --- Message Handling ---
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "refresh") {
-    // Content script passes the auth token from page cookies
-    if (message.authToken) setAuthToken(message.authToken);
+  if (message.authToken) setAuthToken(message.authToken);
+
+  if (message.action === "sync" || message.action === "refresh") {
+    const forceRefresh = message.action === "refresh";
 
     if (pipelineRunning) {
       sendResponse({ ok: false, reason: "already running" });
       return false;
     }
-    runPipeline(true)
+    runPipeline(forceRefresh)
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
     return true;

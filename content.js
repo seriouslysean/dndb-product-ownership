@@ -5,7 +5,7 @@
 const token = document.cookie.match(/token_DDBUS=([^;]+)/)?.[1];
 const authToken = token ? decodeURIComponent(token).trim() : null;
 
-chrome.runtime.sendMessage({ action: "refresh", authToken }, () => {
+chrome.runtime.sendMessage({ action: "sync", authToken }, () => {
   if (chrome.runtime.lastError) {
     Logger.warn("Failed to trigger background refresh", {
       error: chrome.runtime.lastError.message,
