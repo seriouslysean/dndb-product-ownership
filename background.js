@@ -10,13 +10,15 @@ chrome.sidePanel
 
 // --- Auth & Fetch ---
 
-const getAuthToken = async () => {
-  const cookie = await chrome.cookies.get({
-    url: MARKETPLACE_BASE,
-    name: "token_DDBUS",
-  });
-  return cookie?.value ? decodeURIComponent(cookie.value).trim() : null;
+// Token is passed from content script (page context reads document.cookie).
+// Cached here so the pipeline can run without a marketplace tab.
+let cachedAuthToken = null;
+
+const setAuthToken = (token) => {
+  cachedAuthToken = token;
 };
+
+const getAuthToken = () => cachedAuthToken;
 
 // All external fetches in the background go through this.
 // Resolves relative paths, adds auth, checks response status.
@@ -24,7 +26,7 @@ const bgFetch = async (url, { auth = true, ...options } = {}) => {
   const fullUrl = url.startsWith("/") ? `${MARKETPLACE_BASE}${url}` : url;
 
   if (auth) {
-    const token = await getAuthToken();
+    const token = getAuthToken();
     if (!token) throw Object.assign(new Error("No auth token"), { isAuthError: true });
     options.headers = { ...options.headers, Authorization: token };
   }
@@ -32,6 +34,7 @@ const bgFetch = async (url, { auth = true, ...options } = {}) => {
   const response = await fetch(fullUrl, options);
 
   if (response.status === 401) {
+    cachedAuthToken = null;
     throw Object.assign(new Error("Token expired"), { isAuthError: true });
   }
   if (!response.ok) throw new Error(`${response.status} ${fullUrl}`);
@@ -39,7 +42,6 @@ const bgFetch = async (url, { auth = true, ...options } = {}) => {
   return response;
 };
 
-// Convenience: bgFetch + parse JSON
 const apiFetch = async (url) => {
   const response = await bgFetch(url);
   return response.json();
@@ -280,8 +282,8 @@ const computeNotOwned = (catalog, { ids }) => {
 
 // --- Ownership Data Sources ---
 
-const getCustomerIdFromToken = async () => {
-  const token = await getAuthToken();
+const getCustomerIdFromToken = () => {
+  const token = getAuthToken();
   if (!token) return null;
 
   try {
@@ -296,7 +298,7 @@ const getCustomerIdFromToken = async () => {
 };
 
 const fetchOwnershipFromApi = async () => {
-  const customerId = await getCustomerIdFromToken();
+  const customerId = getCustomerIdFromToken();
   if (!customerId) return [];
   const data = await apiFetch(endpoints.customerProfile(customerId));
   return data.c_productsLicensed || [];
@@ -323,8 +325,7 @@ const fetchOwnershipFromLicensesPage = async () => {
 };
 
 const fetchOwnershipFromOrders = async () => {
-  const token = await getAuthToken();
-  if (!token) return [];
+  if (!getAuthToken()) return [];
 
   return paginateFetch(async (offset, limit) => {
     const response = await bgFetch(endpoints.orderHistory(offset, limit), {
@@ -495,6 +496,9 @@ const runPipeline = async (forceRefresh = false) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "refresh") {
+    // Content script passes the auth token from page cookies
+    if (message.authToken) setAuthToken(message.authToken);
+
     if (pipelineRunning) {
       sendResponse({ ok: false, reason: "already running" });
       return false;
@@ -522,6 +526,9 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // --- Startup ---
 
-loadIdAliases().then(() => runPipeline());
+// Load aliases immediately. Pipeline only runs when a content script
+// sends a token (marketplace page load) or popup requests a refresh.
+// On startup with no token, show cached data or NOT_AUTHENTICATED.
+loadIdAliases();
 
 Logger.log("Background script loaded");
