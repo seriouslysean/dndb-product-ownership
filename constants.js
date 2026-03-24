@@ -24,8 +24,16 @@ const STORAGE = Object.freeze({
   LAST_CATALOG_FETCH: "dndbpo-last-catalog-fetch",
   FILTER_PREFS: "dndbpo-filter-prefs",
   DISMISSED: "dndbpo-dismissed",
+  KNOWN_IDS: "dndbpo-known-ids",
   VERSION: "dndbpo-version",
 });
+
+// How long a product is considered "new" after first appearing in the catalog
+const NEW_PRODUCT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// chrome.storage.local quota is 10MB. Warn at 80%.
+const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
+const STORAGE_QUOTA_WARN = 0.8;
 
 const SYNC_STAGE = Object.freeze({
   STARTING: "starting",

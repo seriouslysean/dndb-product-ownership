@@ -281,6 +281,13 @@ const render = (data) => {
       nameEl.className = "product__name";
       nameEl.textContent = product.name || "(unnamed)";
 
+      if (product.isNew) {
+        const newBadge = document.createElement("span");
+        newBadge.className = "product__new";
+        newBadge.textContent = "New";
+        nameEl.appendChild(newBadge);
+      }
+
       const priceText = formatPrice(product.price);
       if (priceText) {
         const priceSpan = document.createElement("span");

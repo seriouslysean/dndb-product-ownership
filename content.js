@@ -185,9 +185,24 @@ const fetchCatalog = async (forceRefresh = false) => {
 
   const catalog = [...masters, ...sets, ...items];
 
+  // Tag new products (not seen in previous catalog)
+  const stored = await chrome.storage.local.get(STORAGE.KNOWN_IDS);
+  const knownIds = stored[STORAGE.KNOWN_IDS] || {};
+  const now = Date.now();
+
+  for (const product of catalog) {
+    if (!knownIds[product.id]) {
+      knownIds[product.id] = now;
+      product.isNew = true;
+    } else {
+      product.isNew = now - knownIds[product.id] < NEW_PRODUCT_TTL_MS;
+    }
+  }
+
   await chrome.storage.local.set({
     [STORAGE.CATALOG]: catalog,
     [STORAGE.LAST_CATALOG_FETCH]: Date.now(),
+    [STORAGE.KNOWN_IDS]: knownIds,
   });
 
   Logger.log("Catalog cached", { count: catalog.length });
@@ -375,6 +390,20 @@ const checkVersionChange = async () => {
   return false;
 };
 
+// --- Storage Quota ---
+
+const checkStorageQuota = async () => {
+  const bytes = await chrome.storage.local.getBytesInUse(null);
+  const usage = bytes / STORAGE_QUOTA_BYTES;
+  if (usage > STORAGE_QUOTA_WARN) {
+    Logger.warn("Storage quota warning", {
+      used: `${(bytes / 1024).toFixed(0)}KB`,
+      percent: `${(usage * 100).toFixed(1)}%`,
+    });
+  }
+  return { bytes, usage };
+};
+
 // --- Sync Stage Reporting ---
 
 const setSyncStage = (stage) =>
@@ -438,6 +467,7 @@ const runPipeline = async (forceRefresh = false) => {
     });
   } finally {
     pipelineRunning = false;
+    await checkStorageQuota();
   }
 };
 

@@ -338,6 +338,17 @@ body {
   line-height: var(--line-height-body);
 }
 
+.product__new {
+  font-size: var(--font-size-caption2);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-badge-sourcebook-fg);
+  background: var(--color-badge-sourcebook-bg);
+  padding: 1px var(--space-xs);
+  border-radius: 3px;
+  margin-left: var(--space-sm);
+  vertical-align: middle;
+}
+
 .product__price {
   font-size: var(--font-size-subhead);
   color: var(--color-text-price);
