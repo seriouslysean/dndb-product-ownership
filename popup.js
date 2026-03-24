@@ -5,8 +5,11 @@ const listEl = document.getElementById("product-list");
 const filtersEl = document.getElementById("filters");
 const formatToggleEl = document.getElementById("format-toggle");
 const publisherToggleEl = document.getElementById("publisher-toggle");
+const statsEl = document.getElementById("stats");
 const lastUpdatedEl = document.getElementById("last-updated");
 const refreshBtn = document.getElementById("refresh-btn");
+const settingsBtn = document.getElementById("settings-btn");
+const settingsPanel = document.getElementById("settings-panel");
 const loginGate = document.getElementById("login-gate");
 const loginMessage = document.getElementById("login-message");
 const syncingGate = document.getElementById("syncing-gate");
@@ -18,6 +21,7 @@ let hiddenCategories = new Set();
 let dismissedProducts = new Set();
 let formatFilter = FORMAT.DIGITAL;
 let publisherFilter = PUBLISHER.ALL;
+let settingsOpen = false;
 
 const FORMAT_OPTIONS = [
   { key: FORMAT.DIGITAL, label: "Digital" },
@@ -105,26 +109,21 @@ const showView = (view) => {
   mainContent.style.display = view === "main" ? "" : "none";
 };
 
-// --- Rendering ---
+// --- Settings Panel ---
 
-const renderToggle = (container, options, activeKey, onChange) => {
-  container.innerHTML = "";
-  for (const { key, label } of options) {
-    const btn = document.createElement("button");
-    btn.className = `format-btn${activeKey === key ? " active" : ""}`;
-    btn.textContent = label;
-    btn.addEventListener("click", () => {
-      onChange(key);
-      saveFilterPrefs();
-      render(currentData);
-    });
-    container.appendChild(btn);
-  }
-};
+const renderSettings = (groups, data) => {
+  // Format toggle
+  renderToggle(formatToggleEl, FORMAT_OPTIONS, formatFilter, (key) => {
+    formatFilter = key;
+  });
 
-const renderCategoryChips = (groups) => {
+  // Publisher toggle
+  renderToggle(publisherToggleEl, PUBLISHER_OPTIONS, publisherFilter, (key) => {
+    publisherFilter = key;
+  });
+
+  // Category chips
   filtersEl.innerHTML = "";
-
   for (const { key } of DISPLAY_CATEGORIES) {
     const count = groups[key]?.length || 0;
     if (count === 0) continue;
@@ -144,6 +143,35 @@ const renderCategoryChips = (groups) => {
       render(currentData);
     });
     filtersEl.appendChild(chip);
+  }
+
+  // Stats
+  if (data) {
+    const allProducts = data.products || [];
+    const lines = [
+      `${data.ownedCount} owned of ${data.totalCatalog} total`,
+      `${allProducts.length} not owned`,
+      `${dismissedProducts.size} dismissed`,
+      `${hiddenCategories.size} categories hidden`,
+    ];
+    statsEl.textContent = lines.join(" \u00b7 ");
+  }
+};
+
+// --- Rendering ---
+
+const renderToggle = (container, options, activeKey, onChange) => {
+  container.innerHTML = "";
+  for (const { key, label } of options) {
+    const btn = document.createElement("button");
+    btn.className = `format-btn${activeKey === key ? " active" : ""}`;
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      onChange(key);
+      saveFilterPrefs();
+      render(currentData);
+    });
+    container.appendChild(btn);
   }
 };
 
@@ -193,20 +221,8 @@ const render = (data) => {
     return true;
   });
 
-  renderToggle(formatToggleEl, FORMAT_OPTIONS, formatFilter, (key) => {
-    formatFilter = key;
-  });
-  renderToggle(publisherToggleEl, PUBLISHER_OPTIONS, publisherFilter, (key) => {
-    publisherFilter = key;
-  });
-
   if (allProducts.length === 0) {
     summaryEl.textContent = `You own everything! (${data.ownedCount} of ${data.totalCatalog})`;
-    return;
-  }
-
-  if (products.length === 0) {
-    summaryEl.textContent = `No matching products (${allProducts.length} total not owned)`;
     return;
   }
 
@@ -216,7 +232,13 @@ const render = (data) => {
     (groups[cat] ??= []).push(product);
   }
 
-  renderCategoryChips(groups);
+  // Render settings panel content (always, so it's ready when opened)
+  renderSettings(groups, data);
+
+  if (products.length === 0) {
+    summaryEl.textContent = `No matching products (${allProducts.length} total not owned)`;
+    return;
+  }
 
   let visibleCount = 0;
   let hiddenCount = 0;
@@ -304,10 +326,8 @@ const render = (data) => {
     }
   }
 
-  const parts = [`${products.length} not owned, ${data.ownedCount} owned of ${data.totalCatalog}`];
+  const parts = [`${products.length} not owned`];
   if (hiddenCount > 0) parts.push(`${hiddenCount} hidden`);
-  if (dismissedProducts.size > 0) parts.push(`${dismissedProducts.size} dismissed`);
-  if (visibleCount !== products.length && visibleCount > 0) parts.push(`showing ${visibleCount}`);
   summaryEl.textContent = parts.join(" \u00b7 ");
 
   if (data.lastUpdated) {
@@ -322,7 +342,13 @@ document.getElementById("open-marketplace").addEventListener("click", (e) => {
   chrome.tabs.create({ url: `${MARKETPLACE_BASE}/` });
 });
 
-document.getElementById("undismiss-btn")?.addEventListener("click", undismissAll);
+document.getElementById("undismiss-btn").addEventListener("click", undismissAll);
+
+settingsBtn.addEventListener("click", () => {
+  settingsOpen = !settingsOpen;
+  settingsPanel.style.display = settingsOpen ? "" : "none";
+  settingsBtn.classList.toggle("active", settingsOpen);
+});
 
 refreshBtn.addEventListener("click", async () => {
   refreshBtn.disabled = true;
@@ -331,11 +357,9 @@ refreshBtn.addEventListener("click", async () => {
   const tabs = await chrome.tabs.query({ url: `${MARKETPLACE_BASE}/*` });
 
   if (tabs.length === 0) {
-    // Open a marketplace tab and wait for it to load
     showView("syncing");
     syncingMessage.textContent = "Opening marketplace...";
     chrome.tabs.create({ url: `${MARKETPLACE_BASE}/`, active: false });
-    // The content script will auto-run the pipeline on the new tab
     refreshBtn.disabled = false;
     refreshBtn.textContent = "Refresh";
     return;
