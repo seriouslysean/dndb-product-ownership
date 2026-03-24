@@ -398,5 +398,18 @@ chrome.storage.onChanged.addListener((changes) => {
   await loadPrefs();
   const result = await chrome.storage.local.get(STORAGE.NOT_OWNED);
   currentData = result[STORAGE.NOT_OWNED] || null;
+
+  // Don't show stale errors on open — show syncing and let the background update
+  if (currentData?.errorCode) {
+    currentData = { syncing: true, stage: SYNC_STAGE.STARTING };
+    chrome.runtime.sendMessage({ action: "refresh" }, () => {
+      if (chrome.runtime.lastError) {
+        // Background not available, show the actual error
+        currentData = result[STORAGE.NOT_OWNED] || null;
+        render(currentData);
+      }
+    });
+  }
+
   render(currentData);
 })();
