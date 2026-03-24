@@ -369,28 +369,16 @@ if (searchInput) {
   });
 }
 
-refreshBtn.addEventListener("click", async () => {
+refreshBtn.addEventListener("click", () => {
   refreshBtn.disabled = true;
   refreshBtn.textContent = "Refreshing...";
-
-  const tabs = await chrome.tabs.query({ url: `${MARKETPLACE_BASE}/*` });
-
-  if (tabs.length === 0) {
-    showView("syncing");
-    syncingMessage.textContent = "Opening marketplace...";
-    chrome.tabs.create({ url: `${MARKETPLACE_BASE}/`, active: false });
-    refreshBtn.disabled = false;
-    refreshBtn.textContent = "Refresh";
-    return;
-  }
-
   showView("syncing");
   syncingMessage.textContent = "Starting sync...";
 
-  chrome.tabs.sendMessage(tabs[0].id, { action: "refresh" }, () => {
+  chrome.runtime.sendMessage({ action: "refresh" }, () => {
     if (chrome.runtime.lastError) {
       showView("login");
-      loginMessage.textContent = "Could not reach marketplace tab. Try reloading it.";
+      loginMessage.textContent = "Could not connect to background. Try reloading the extension.";
     }
     refreshBtn.disabled = false;
     refreshBtn.textContent = "Refresh";
