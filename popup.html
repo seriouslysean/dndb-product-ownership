@@ -16,7 +16,7 @@
 
   <div id="syncing-gate" class="gate" style="display:none">
     <div class="spinner"></div>
-    <p>Syncing your library...</p>
+    <p id="syncing-message">Syncing...</p>
   </div>
 
   <div id="main-content" style="display:none">
@@ -32,7 +32,10 @@
 
   <div class="footer">
     <span id="last-updated" class="last-updated"></span>
-    <button id="refresh-btn" class="refresh-btn">Refresh</button>
+    <div class="footer-actions">
+      <button id="undismiss-btn" class="footer-btn" title="Show dismissed products">Reset</button>
+      <button id="refresh-btn" class="refresh-btn">Refresh</button>
+    </div>
   </div>
 
   <script src="constants.js"></script>

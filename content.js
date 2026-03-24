@@ -11,12 +11,33 @@ const getAuthToken = () => {
 
 const apiFetch = async (url) => {
   const token = getAuthToken();
-  if (!token) throw new Error("No auth token found");
+  if (!token) throw Object.assign(new Error("No auth token"), { isAuthError: true });
 
   const response = await fetch(url, { headers: { Authorization: token } });
+
+  if (response.status === 401) {
+    throw Object.assign(new Error("Token expired"), { isAuthError: true });
+  }
   if (!response.ok) throw new Error(`API ${response.status}`);
 
   return response.json();
+};
+
+// --- ID Aliases ---
+
+let idAliases = {};
+
+const loadIdAliases = async () => {
+  try {
+    const url = chrome.runtime.getURL("id-aliases.json");
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const { $schema, ...aliases } = data;
+    idAliases = aliases;
+    Logger.log("ID aliases loaded", { count: Object.keys(idAliases).length });
+  } catch (e) {
+    Logger.warn("Failed to load ID aliases", { error: e.message });
+  }
 };
 
 // --- Category Resolution ---
@@ -33,6 +54,15 @@ const resolveCategory = (entry, product) => {
 
   const fallback = CATEGORY_FALLBACKS.find((f) => f.test(entry));
   if (fallback) return fallback.category;
+
+  // Log unmapped categories to detect API drift
+  if (
+    product.primaryCategoryId &&
+    product.primaryCategoryId !== "root" &&
+    product.primaryCategoryId !== "none"
+  ) {
+    Logger.warn("Unmapped category", { id: entry.id, category: product.primaryCategoryId });
+  }
 
   return "Other";
 };
@@ -67,7 +97,6 @@ const fetchCatalog = async (forceRefresh = false) => {
       url: endpoints.productPage(id),
     };
 
-    // Extract format from search hit variationAttributes (masters)
     if (type.master && hit.variationAttributes) {
       const formats =
         hit.variationAttributes
@@ -94,8 +123,8 @@ const fetchCatalog = async (forceRefresh = false) => {
     entry.publisher = product.c_publisher || null;
     entry.isFirstParty = FIRST_PARTY_PUBLISHERS.includes(entry.publisher);
     entry.primaryCategoryId = product.primaryCategoryId || null;
+    entry.price = product.c_salePrice ?? product.price ?? null;
 
-    // Format (skip if already set from search hit variationAttributes)
     if (!entry.format) {
       entry.format =
         product.c_productStyle === "Physical"
@@ -105,10 +134,8 @@ const fetchCatalog = async (forceRefresh = false) => {
             : FORMAT.DIGITAL;
     }
 
-    // Category
     entry.category = resolveCategory(entry, product);
 
-    // Variants (masters)
     if (entry.type === "master") {
       entry.variants = (product.variants || []).map((v) => ({
         id: v.productId,
@@ -116,7 +143,6 @@ const fetchCatalog = async (forceRefresh = false) => {
       }));
     }
 
-    // Bundle children (sets)
     if (product.setProducts) {
       entry.children = product.setProducts.map((sp) => ({
         id: sp.id,
@@ -166,25 +192,6 @@ const fetchCatalog = async (forceRefresh = false) => {
 
   Logger.log("Catalog cached", { count: catalog.length });
   return catalog;
-};
-
-// --- ID Aliases ---
-
-// Loaded from id-aliases.json at startup. Maps catalog IDs to license IDs
-// for known mismatches between the marketplace and the licenses page.
-let idAliases = {};
-
-const loadIdAliases = async () => {
-  try {
-    const url = chrome.runtime.getURL("id-aliases.json");
-    const resp = await fetch(url);
-    const data = await resp.json();
-    const { $schema, ...aliases } = data;
-    idAliases = aliases;
-    Logger.log("ID aliases loaded", { count: Object.keys(idAliases).length });
-  } catch (e) {
-    Logger.warn("Failed to load ID aliases", { error: e.message });
-  }
 };
 
 // --- Ownership Matching ---
@@ -243,7 +250,10 @@ const getCustomerIdFromToken = () => {
 
   try {
     const jwt = token.replace(/^Bearer\s+/i, "");
-    const payload = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    // base64url decode with proper padding
+    const base64 = jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded));
     return payload.isb?.match(/rcid:([^:]+)::/)?.[1] ?? null;
   } catch {
     return null;
@@ -262,8 +272,12 @@ const fetchOwnershipFromLicensesPage = async () => {
   if (!response.ok) throw new Error(`Licenses page ${response.status}`);
 
   const html = await response.text();
-  const doc = new DOMParser().parseFromString(html, "text/html");
+  // Detect login redirect (HTML without expected table)
+  if (!html.includes("<table")) {
+    throw new Error("Licenses page returned no table (likely login redirect)");
+  }
 
+  const doc = new DOMParser().parseFromString(html, "text/html");
   const ids = [];
   for (const row of doc.querySelectorAll("table tbody tr")) {
     const id = row.querySelector("td")?.textContent?.trim();
@@ -361,6 +375,11 @@ const checkVersionChange = async () => {
   return false;
 };
 
+// --- Sync Stage Reporting ---
+
+const setSyncStage = (stage) =>
+  chrome.storage.local.set({ [STORAGE.NOT_OWNED]: { syncing: true, stage } });
+
 // --- Pipeline ---
 
 const loadStoredOwnership = async () => {
@@ -382,8 +401,9 @@ const runPipeline = async (forceRefresh = false) => {
     const shouldRefresh = forceRefresh || versionChanged;
 
     Logger.log("Pipeline started", { forceRefresh: shouldRefresh });
-    await chrome.storage.local.set({ [STORAGE.NOT_OWNED]: { syncing: true } });
+    await setSyncStage(SYNC_STAGE.STARTING);
 
+    await setSyncStage(SYNC_STAGE.OWNERSHIP);
     const ownershipData = shouldRefresh
       ? await fetchOwnershipData()
       : ((await loadStoredOwnership()) ?? (await fetchOwnershipData()));
@@ -395,7 +415,10 @@ const runPipeline = async (forceRefresh = false) => {
       return;
     }
 
+    await setSyncStage(SYNC_STAGE.CATALOG);
     const catalog = await fetchCatalog(shouldRefresh);
+
+    await setSyncStage(SYNC_STAGE.MATCHING);
     const notOwned = computeNotOwned(catalog, ownershipData);
 
     Logger.log("Pipeline complete", { notOwned: notOwned.length, total: catalog.length });
@@ -409,8 +432,9 @@ const runPipeline = async (forceRefresh = false) => {
     });
   } catch (error) {
     Logger.error("Pipeline failed", error);
+    const errorCode = error.isAuthError ? ERROR.TOKEN_EXPIRED : ERROR.FETCH_FAILED;
     await chrome.storage.local.set({
-      [STORAGE.NOT_OWNED]: { errorCode: ERROR.FETCH_FAILED, errorMessage: error.message },
+      [STORAGE.NOT_OWNED]: { errorCode, errorMessage: error.message },
     });
   } finally {
     pipelineRunning = false;

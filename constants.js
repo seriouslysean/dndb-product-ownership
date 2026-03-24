@@ -5,8 +5,15 @@ const FORMAT = Object.freeze({
   ALL: "all",
 });
 
+const PUBLISHER = Object.freeze({
+  ALL: "all",
+  FIRST_PARTY: "first-party",
+  THIRD_PARTY: "third-party",
+});
+
 const ERROR = Object.freeze({
   NOT_AUTHENTICATED: "NOT_AUTHENTICATED",
+  TOKEN_EXPIRED: "TOKEN_EXPIRED",
   FETCH_FAILED: "FETCH_FAILED",
 });
 
@@ -16,7 +23,15 @@ const STORAGE = Object.freeze({
   NOT_OWNED: "dndbpo-not-owned",
   LAST_CATALOG_FETCH: "dndbpo-last-catalog-fetch",
   FILTER_PREFS: "dndbpo-filter-prefs",
+  DISMISSED: "dndbpo-dismissed",
   VERSION: "dndbpo-version",
+});
+
+const SYNC_STAGE = Object.freeze({
+  STARTING: "starting",
+  OWNERSHIP: "ownership",
+  CATALOG: "catalog",
+  MATCHING: "matching",
 });
 
 const FIRST_PARTY_PUBLISHERS = Object.freeze([
@@ -24,7 +39,7 @@ const FIRST_PARTY_PUBLISHERS = Object.freeze([
   "Wizards of the Coast & Visionary Production and Design",
 ]);
 
-// Maps primaryCategoryId → display category
+// Maps primaryCategoryId to display category.
 // Derived from navigation tree API:
 //   GET /mobify/proxy/ocapi/s/DDBUS/dw/shop/v21_3/categories/root?levels=3&type=navigation
 const CATEGORY_BY_API_ID = Object.freeze({

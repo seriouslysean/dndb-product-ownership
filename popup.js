@@ -10,12 +10,14 @@ const refreshBtn = document.getElementById("refresh-btn");
 const loginGate = document.getElementById("login-gate");
 const loginMessage = document.getElementById("login-message");
 const syncingGate = document.getElementById("syncing-gate");
+const syncingMessage = document.getElementById("syncing-message");
 const mainContent = document.getElementById("main-content");
 
 let currentData = null;
 let hiddenCategories = new Set();
+let dismissedProducts = new Set();
 let formatFilter = FORMAT.DIGITAL;
-let publisherFilter = "all"; // 'all', 'first-party', 'third-party'
+let publisherFilter = PUBLISHER.ALL;
 
 const FORMAT_OPTIONS = [
   { key: FORMAT.DIGITAL, label: "Digital" },
@@ -24,10 +26,17 @@ const FORMAT_OPTIONS = [
 ];
 
 const PUBLISHER_OPTIONS = [
-  { key: "all", label: "All" },
-  { key: "first-party", label: "Official" },
-  { key: "third-party", label: "Third-Party" },
+  { key: PUBLISHER.ALL, label: "All" },
+  { key: PUBLISHER.FIRST_PARTY, label: "Official" },
+  { key: PUBLISHER.THIRD_PARTY, label: "Third-Party" },
 ];
+
+const STAGE_LABELS = {
+  [SYNC_STAGE.STARTING]: "Starting sync...",
+  [SYNC_STAGE.OWNERSHIP]: "Checking ownership...",
+  [SYNC_STAGE.CATALOG]: "Fetching catalog...",
+  [SYNC_STAGE.MATCHING]: "Matching products...",
+};
 
 // --- Categorization (data-driven) ---
 
@@ -45,23 +54,25 @@ const matchesFormat = (product) => {
 };
 
 const matchesPublisher = (product) => {
-  if (publisherFilter === "all") return true;
-  if (publisherFilter === "first-party") return product.isFirstParty === true;
+  if (publisherFilter === PUBLISHER.ALL) return true;
+  if (publisherFilter === PUBLISHER.FIRST_PARTY) return product.isFirstParty === true;
   return product.isFirstParty !== true;
 };
 
-const matchesFilters = (product) => matchesFormat(product) && matchesPublisher(product);
+const matchesFilters = (product) =>
+  matchesFormat(product) && matchesPublisher(product) && !dismissedProducts.has(product.id);
 
-// --- Saved Filter Preferences ---
+// --- Saved Preferences ---
 
-const loadFilterPrefs = async () => {
-  const result = await chrome.storage.local.get(STORAGE.FILTER_PREFS);
+const loadPrefs = async () => {
+  const result = await chrome.storage.local.get([STORAGE.FILTER_PREFS, STORAGE.DISMISSED]);
   const prefs = result[STORAGE.FILTER_PREFS];
   if (prefs) {
     hiddenCategories = new Set(prefs.hiddenCategories || []);
     formatFilter = prefs.format || FORMAT.DIGITAL;
-    publisherFilter = prefs.publisher || "all";
+    publisherFilter = prefs.publisher || PUBLISHER.ALL;
   }
+  dismissedProducts = new Set(result[STORAGE.DISMISSED] || []);
 };
 
 const saveFilterPrefs = () => {
@@ -72,6 +83,18 @@ const saveFilterPrefs = () => {
       publisher: publisherFilter,
     },
   });
+};
+
+const dismissProduct = (productId) => {
+  dismissedProducts.add(productId);
+  chrome.storage.local.set({ [STORAGE.DISMISSED]: [...dismissedProducts] });
+  render(currentData);
+};
+
+const undismissAll = () => {
+  dismissedProducts.clear();
+  chrome.storage.local.set({ [STORAGE.DISMISSED]: [] });
+  render(currentData);
 };
 
 // --- View State ---
@@ -124,6 +147,11 @@ const renderCategoryChips = (groups) => {
   }
 };
 
+const formatPrice = (price) => {
+  if (price == null) return null;
+  return `$${Number(price).toFixed(2)}`;
+};
+
 const render = (data) => {
   listEl.innerHTML = "";
   summaryEl.textContent = "";
@@ -135,10 +163,14 @@ const render = (data) => {
   }
   if (data.syncing) {
     showView("syncing");
+    syncingMessage.textContent = STAGE_LABELS[data.stage] || "Syncing...";
     return;
   }
-  if (data.errorCode === ERROR.NOT_AUTHENTICATED) {
+  if (data.errorCode === ERROR.NOT_AUTHENTICATED || data.errorCode === ERROR.TOKEN_EXPIRED) {
     showView("login");
+    if (data.errorCode === ERROR.TOKEN_EXPIRED) {
+      loginMessage.textContent = "Session expired. Open the marketplace and sign in again.";
+    }
     return;
   }
   if (data.errorCode) {
@@ -154,7 +186,6 @@ const render = (data) => {
   const allProducts = data.products || [];
   const products = allProducts.filter((product) => {
     if (!matchesFilters(product)) return false;
-    // Hide bundles where all format-relevant children are owned
     if (product.children?.length > 0) {
       const relevant = product.children.filter(matchesFormat);
       if (relevant.length > 0 && relevant.every((c) => c.isOwned)) return false;
@@ -208,10 +239,13 @@ const render = (data) => {
 
     for (const product of group) {
       const url = product.url || endpoints.productPage(product.id);
-      const entry = document.createElement("a");
+      const entry = document.createElement("div");
       entry.className = "product-entry";
-      entry.href = url;
-      entry.addEventListener("click", (e) => {
+
+      const link = document.createElement("a");
+      link.className = "product-link";
+      link.href = url;
+      link.addEventListener("click", (e) => {
         e.preventDefault();
         if (url.startsWith(MARKETPLACE_BASE)) chrome.tabs.create({ url });
       });
@@ -220,7 +254,14 @@ const render = (data) => {
       nameEl.className = "product-name";
       nameEl.textContent = product.name || "(unnamed)";
 
-      // Bundle children — filter by active format, recompute counts
+      const priceEl = formatPrice(product.price);
+      if (priceEl) {
+        const priceSpan = document.createElement("span");
+        priceSpan.className = "product-price";
+        priceSpan.textContent = priceEl;
+        nameEl.appendChild(priceSpan);
+      }
+
       const relevantChildren = (product.children || []).filter(matchesFormat);
       const missingChildren = relevantChildren.filter((c) => !c.isOwned);
       const ownedCount = relevantChildren.length - missingChildren.length;
@@ -241,20 +282,33 @@ const render = (data) => {
         }
       }
 
+      link.appendChild(nameEl);
+
       const badge = document.createElement("span");
       badge.className = `type-badge ${badgeClassFor(key)}`;
       badge.textContent = key;
 
-      entry.appendChild(nameEl);
+      const dismissBtn = document.createElement("button");
+      dismissBtn.className = "dismiss-btn";
+      dismissBtn.textContent = "\u00d7";
+      dismissBtn.title = "Not interested";
+      dismissBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        dismissProduct(product.id);
+      });
+
+      entry.appendChild(link);
       entry.appendChild(badge);
+      entry.appendChild(dismissBtn);
       listEl.appendChild(entry);
     }
   }
 
   const parts = [`${products.length} not owned, ${data.ownedCount} owned of ${data.totalCatalog}`];
   if (hiddenCount > 0) parts.push(`${hiddenCount} hidden`);
+  if (dismissedProducts.size > 0) parts.push(`${dismissedProducts.size} dismissed`);
   if (visibleCount !== products.length && visibleCount > 0) parts.push(`showing ${visibleCount}`);
-  summaryEl.textContent = parts.join(" · ");
+  summaryEl.textContent = parts.join(" \u00b7 ");
 
   if (data.lastUpdated) {
     lastUpdatedEl.textContent = `Updated ${new Date(data.lastUpdated).toLocaleString()}`;
@@ -268,20 +322,27 @@ document.getElementById("open-marketplace").addEventListener("click", (e) => {
   chrome.tabs.create({ url: `${MARKETPLACE_BASE}/` });
 });
 
+document.getElementById("undismiss-btn")?.addEventListener("click", undismissAll);
+
 refreshBtn.addEventListener("click", async () => {
   refreshBtn.disabled = true;
   refreshBtn.textContent = "Refreshing...";
-  showView("syncing");
 
   const tabs = await chrome.tabs.query({ url: `${MARKETPLACE_BASE}/*` });
 
   if (tabs.length === 0) {
-    showView("login");
-    loginMessage.textContent = "Open marketplace.dndbeyond.com in a tab to refresh.";
+    // Open a marketplace tab and wait for it to load
+    showView("syncing");
+    syncingMessage.textContent = "Opening marketplace...";
+    chrome.tabs.create({ url: `${MARKETPLACE_BASE}/`, active: false });
+    // The content script will auto-run the pipeline on the new tab
     refreshBtn.disabled = false;
     refreshBtn.textContent = "Refresh";
     return;
   }
+
+  showView("syncing");
+  syncingMessage.textContent = "Starting sync...";
 
   chrome.tabs.sendMessage(tabs[0].id, { action: "refresh" }, () => {
     if (chrome.runtime.lastError) {
@@ -303,7 +364,7 @@ chrome.storage.onChanged.addListener((changes) => {
 // --- Init ---
 
 (async () => {
-  await loadFilterPrefs();
+  await loadPrefs();
   const result = await chrome.storage.local.get(STORAGE.NOT_OWNED);
   currentData = result[STORAGE.NOT_OWNED] || null;
   render(currentData);

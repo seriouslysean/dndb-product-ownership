@@ -169,9 +169,7 @@ body {
   align-items: flex-start;
   gap: 8px;
   padding: 6px 16px;
-  text-decoration: none;
   color: #e0e0e0;
-  cursor: pointer;
   transition: background 0.15s;
 }
 
@@ -179,14 +177,46 @@ body {
   background: #2a2a3e;
 }
 
-.product-name {
+.product-link {
   flex: 1;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.product-name {
   line-height: 1.3;
+}
+
+.product-price {
+  font-size: 11px;
+  color: #87b8ce;
+  margin-left: 6px;
 }
 
 .product-note {
   font-size: 11px;
   color: #b0b0b0;
+}
+
+.dismiss-btn {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.dismiss-btn:hover {
+  color: #e74c3c;
+}
+
+.product-entry:hover .dismiss-btn {
+  opacity: 1;
 }
 
 .product-child-missing {
@@ -253,6 +283,12 @@ body {
   color: #8a8a8a;
 }
 
+.footer-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.footer-btn,
 .refresh-btn {
   font-size: 12px;
   padding: 4px 12px;
