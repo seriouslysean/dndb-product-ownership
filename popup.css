@@ -480,7 +480,6 @@ body {
 
 .footer__btn--icon {
   font-size: var(--font-size-title);
-  padding: var(--space-xs) var(--space-sm);
 }
 
 .footer__btn--active {

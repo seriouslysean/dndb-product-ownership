@@ -298,17 +298,13 @@ const fetchOwnershipFromLicensesPage = async () => {
     throw new Error("Licenses page returned no table (likely login redirect)");
   }
 
-  // Service worker has no DOMParser, use regex
+  // Service worker has no DOMParser — extract first <td> from each <tr>
   const ids = [];
-  const rowPattern = /<td[^>]*>([^<]+)<\/td>/g;
+  const rowPattern = /<tr[^>]*>\s*<td[^>]*>([^<]+)<\/td>/g;
   let match;
-  let cellIndex = 0;
   while ((match = rowPattern.exec(html)) !== null) {
-    if (cellIndex % 4 === 0) {
-      const id = match[1].trim();
-      if (id) ids.push(id);
-    }
-    cellIndex++;
+    const id = match[1].trim();
+    if (id) ids.push(id);
   }
 
   return ids;

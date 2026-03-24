@@ -362,12 +362,10 @@ settingsBtn.addEventListener("click", () => {
   settingsBtn.classList.toggle("footer__btn--active", settingsOpen);
 });
 
-if (searchInput) {
-  searchInput.addEventListener("input", (e) => {
-    searchQuery = e.target.value.toLowerCase().trim();
-    render(currentData);
-  });
-}
+searchInput.addEventListener("input", (e) => {
+  searchQuery = e.target.value.toLowerCase().trim();
+  render(currentData);
+});
 
 refreshBtn.addEventListener("click", () => {
   refreshBtn.disabled = true;
