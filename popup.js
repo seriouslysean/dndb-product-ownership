@@ -152,7 +152,15 @@ const render = (data) => {
   summaryEl.style.color = "";
 
   const allProducts = data.products || [];
-  const products = allProducts.filter(matchesFilters);
+  const products = allProducts.filter((product) => {
+    if (!matchesFilters(product)) return false;
+    // Hide bundles where all format-relevant children are owned
+    if (product.children?.length > 0) {
+      const relevant = product.children.filter(matchesFormat);
+      if (relevant.length > 0 && relevant.every((c) => c.isOwned)) return false;
+    }
+    return true;
+  });
 
   renderToggle(formatToggleEl, FORMAT_OPTIONS, formatFilter, (key) => {
     formatFilter = key;
