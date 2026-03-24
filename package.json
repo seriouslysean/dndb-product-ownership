@@ -3,21 +3,21 @@
   "version": "1.0.0",
   "private": true,
   "description": "Chrome extension that shows which D&D Beyond marketplace products you don't own yet.",
-  "scripts": {
-    "lint": "oxlint . && stylelint '*.css'",
-    "lint:fix": "oxlint --fix . && stylelint --fix '*.css'",
-    "format": "oxfmt --write *.js",
-    "format:check": "oxfmt --check *.js"
+  "homepage": "https://github.com/seriouslysean/dndb-product-ownership#readme",
+  "bugs": {
+    "url": "https://github.com/seriouslysean/dndb-product-ownership/issues"
   },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/seriouslysean/dndb-product-ownership.git"
   },
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/seriouslysean/dndb-product-ownership/issues"
+  "scripts": {
+    "lint": "oxlint . && stylelint '*.css'",
+    "lint:fix": "oxlint --fix . && stylelint --fix '*.css'",
+    "format": "oxfmt --write '**/*.js' '**/*.md' '**/*.json'",
+    "format:check": "oxfmt --check '**/*.js' '**/*.md' '**/*.json'"
   },
-  "homepage": "https://github.com/seriouslysean/dndb-product-ownership#readme",
   "devDependencies": {
     "lefthook": "^1.11.0",
     "oxfmt": "^0.41.0",

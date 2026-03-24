@@ -17,6 +17,7 @@ const STORAGE = Object.freeze({
   LAST_CATALOG_FETCH: "dndbpo-last-catalog-fetch",
   LICENSES_PAGE: "dndbpo-licenses-page",
   FILTER_PREFS: "dndbpo-filter-prefs",
+  VERSION: "dndbpo-version",
 });
 
 const FIRST_PARTY_PUBLISHERS = Object.freeze([
@@ -38,6 +39,10 @@ const CATEGORY_BY_API_ID = Object.freeze({
   "digi-dice": "Dice",
   "CP-SIGIL-25": "Creature Packs",
   "BB-ForgottenRealms-25": "Adventures",
+  "beyond-digital": "Third-Party",
+  "BB-3P-crookedmoon": "Third-Party",
+  "BB-3RDPARTY-2025": "Third-Party",
+  "all-TTRPG": "Third-Party",
   PROMOTION: "Accessories",
   TTRPG: "Accessories",
 });
@@ -48,6 +53,7 @@ const CATEGORY_FALLBACKS = Object.freeze([
   { test: (p) => /^DM[A-Z0-9]/.test(p.id), category: "Maps" },
   { test: (p) => p.id.startsWith("SC"), category: "Creature Packs" },
   { test: (p) => /^DCE-|^DD\d/.test(p.id), category: "Dice" },
+  { test: (p) => !FIRST_PARTY_PUBLISHERS.includes(p.publisher), category: "Third-Party" },
 ]);
 
 // Display order and badge CSS classes
@@ -59,6 +65,7 @@ const DISPLAY_CATEGORIES = Object.freeze([
   { key: "Dice", badge: "dice" },
   { key: "Maps", badge: "map" },
   { key: "Creature Packs", badge: "other" },
+  { key: "Third-Party", badge: "other" },
   { key: "Accessories", badge: "other" },
   { key: "Other", badge: "other" },
   { key: "Bundles", badge: "bundle" },

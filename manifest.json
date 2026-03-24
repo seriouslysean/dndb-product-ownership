@@ -3,19 +3,11 @@
   "name": "D&D Beyond Product Ownership",
   "version": "1.0.0",
   "description": "Chrome extension that shows which D&D Beyond marketplace products you don't own yet.",
-  "permissions": [
-    "storage",
-    "tabs",
-    "sidePanel",
-    "scripting"
-  ],
+  "permissions": ["storage", "tabs", "sidePanel", "scripting"],
   "background": {
     "service_worker": "background.js"
   },
-  "host_permissions": [
-    "https://marketplace.dndbeyond.com/*",
-    "https://www.dndbeyond.com/*"
-  ],
+  "host_permissions": ["https://marketplace.dndbeyond.com/*", "https://www.dndbeyond.com/*"],
   "action": {
     "default_icon": {
       "16": "assets/icon-16.png",

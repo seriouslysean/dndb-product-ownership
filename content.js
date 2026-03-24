@@ -339,6 +339,29 @@ const fetchOwnershipData = async () => {
   return { ids: mergedIds, names: licenseNames };
 };
 
+// --- Cache Versioning ---
+
+const checkVersionChange = async () => {
+  const currentVersion = chrome.runtime.getManifest().version;
+  const stored = await chrome.storage.local.get(STORAGE.VERSION);
+  if (stored[STORAGE.VERSION] !== currentVersion) {
+    Logger.log("Version changed, clearing cache", {
+      from: stored[STORAGE.VERSION],
+      to: currentVersion,
+    });
+    await chrome.storage.local.remove([
+      STORAGE.CATALOG,
+      STORAGE.LAST_CATALOG_FETCH,
+      STORAGE.OWNERSHIP,
+      STORAGE.LICENSES_PAGE,
+      STORAGE.NOT_OWNED,
+    ]);
+    await chrome.storage.local.set({ [STORAGE.VERSION]: currentVersion });
+    return true;
+  }
+  return false;
+};
+
 // --- Pipeline ---
 
 const loadStoredOwnership = async () => {
@@ -356,10 +379,13 @@ const runPipeline = async (forceRefresh = false) => {
   pipelineRunning = true;
 
   try {
-    Logger.log("Pipeline started", { forceRefresh });
+    const versionChanged = await checkVersionChange();
+    const shouldRefresh = forceRefresh || versionChanged;
+
+    Logger.log("Pipeline started", { forceRefresh: shouldRefresh });
     await chrome.storage.local.set({ [STORAGE.NOT_OWNED]: { syncing: true } });
 
-    const ownershipData = forceRefresh
+    const ownershipData = shouldRefresh
       ? await fetchOwnershipData()
       : ((await loadStoredOwnership()) ?? (await fetchOwnershipData()));
 
@@ -370,7 +396,7 @@ const runPipeline = async (forceRefresh = false) => {
       return;
     }
 
-    const catalog = await fetchCatalog(forceRefresh);
+    const catalog = await fetchCatalog(shouldRefresh);
     const notOwned = computeNotOwned(catalog, ownershipData);
 
     Logger.log("Pipeline complete", { notOwned: notOwned.length, total: catalog.length });

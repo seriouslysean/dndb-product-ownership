@@ -2,13 +2,24 @@ pre-commit:
   parallel: true
   jobs:
     - name: lint-js
-      glob: "*.js"
+      glob: "**/*.js"
       run: npx oxlint {staged_files}
 
     - name: format-js
-      glob: "*.js"
+      glob: "**/*.js"
+      run: npx oxfmt --check {staged_files}
+
+    - name: format-md
+      glob: "**/*.md"
+      run: npx oxfmt --check {staged_files}
+
+    - name: format-json
+      glob: "**/*.json"
+      exclude:
+        - "node_modules/**"
+        - "package-lock.json"
       run: npx oxfmt --check {staged_files}
 
     - name: lint-css
-      glob: "*.css"
+      glob: "**/*.css"
       run: npx stylelint {staged_files}
