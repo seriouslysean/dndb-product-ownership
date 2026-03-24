@@ -65,6 +65,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 fieldset {
   border: none;
 }
@@ -472,6 +476,11 @@ body {
 
 .footer__btn:hover {
   background: var(--color-bg-hover);
+}
+
+.footer__btn--icon {
+  font-size: var(--font-size-title);
+  padding: var(--space-xs) var(--space-sm);
 }
 
 .footer__btn--active {
