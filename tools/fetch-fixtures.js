@@ -28,7 +28,7 @@ const REASONS = {
   C5666000:
     "Physical-only item. Category: everything-else + physical → Accessories. No digital variant.",
   "DCE-02101":
-    "Dice with license ID mismatch. Catalog: DCE-02101, license page: DCE-02100. Matched via name fallback.",
+    "Dice with license ID mismatch. Catalog: DCE-02101, license page: DCE-02100. Matched via id-aliases.json.",
   Q4AXQ3W:
     "Third-party master in root. Falls through CATEGORY_FALLBACKS to Third-Party via non-first-party publisher.",
   "core-rulebook-bundle":

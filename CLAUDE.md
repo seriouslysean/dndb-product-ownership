@@ -1,95 +1,64 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for working in this repository.
 
 ## What This Is
 
-Chrome Extension (Manifest V3) that shows which D&D Beyond marketplace products you don't own. Side panel UI with format, category, and publisher filters. Three ownership data sources merged for accuracy.
+A buildless Chrome Manifest V3 extension that shows which D&D Beyond marketplace products the signed-in user does not fully own. Its side panel supports format, category, publisher, and text filters. Three ownership sources are merged to reduce false positives.
 
 ## Commands
 
 ```bash
+npm test              # ownership and parsing tests
 npm run lint          # oxlint (JS) + stylelint (CSS)
 npm run lint:fix      # auto-fix lint issues
-npm run format        # oxfmt --write on all JS
-npm run format:check  # oxfmt --check (CI mode)
+npm run format        # oxfmt --write
+npm run format:check  # oxfmt --check
 ```
 
-Lefthook runs lint-js, format-js, and lint-css on pre-commit.
+Lefthook runs tests, JS/Markdown/JSON formatting, and JS/CSS linting before commits.
 
 ## Architecture
 
-```
+```text
 constants.js  → enums, storage keys, category maps, publisher list
-shared.js     → Logger, endpoints, batch helpers (depends on constants.js)
-content.js    → pipeline: fetch catalog + ownership → compute not-owned (depends on both)
-popup.js      → side panel UI: filters, rendering (depends on both)
-background.js → side panel setup, content script re-injection on install
+shared.js     → logging, URLs, endpoint builders, batch helpers
+ownership.js  → pure ownership, format, and license-parsing rules
+content.js    → reads the marketplace auth cookie and requests a sync
+background.js → fetch pipeline and extension lifecycle
+popup.js      → side-panel filters and rendering
 ```
 
-Load order enforced by manifest.json content_scripts: `constants.js → shared.js → content.js`. Popup loads the same order via script tags. Background uses `importScripts('constants.js', 'shared.js')`.
-
-No build step. No module system. All files share a global scope within their context.
+There is no build step. The background service worker and popup use native ES modules. The isolated content script is a standalone classic script.
 
 ### Data Flow
 
-1. **Content script** runs on marketplace.dndbeyond.com page load
-2. Checks version - clears cache if extension version changed (manifest.json version vs stored)
-3. Fetches ownership from 3 sources in parallel (`Promise.allSettled`):
-   - Marketplace customer API (`c_productsLicensed`)
-   - dndbeyond.com/account/licenses page (HTML scrape for IDs + names)
-   - Order history API (paginated, extracts `sfccProductId`)
-4. Fetches product catalog via SFCC search API, enriches with detail batches
-5. Matches ownership using: direct ID, DB-prefix, variant IDs, name fallback
-6. Stores result in `chrome.storage.local` under `STORAGE.NOT_OWNED`
-7. **Popup** reads from storage, applies format/publisher/category filters, renders
+1. The content script passes the marketplace auth token to the background service worker.
+2. The background merges ownership IDs from the customer API, licenses page, and paginated order history.
+3. It fetches the complete paginated catalog and enriches products in detail batches.
+4. `ownership.js` matches direct IDs, `DB`-prefixed IDs, aliases, master variants, and set children.
+5. The result is stored under `STORAGE.NOT_OWNED`; the popup renders storage changes.
 
-### Category Resolution
+Catalog and ownership caches are reused during automatic sync. The Refresh button forces all sources and the catalog to refetch. A manifest-version change invalidates cached catalog, ownership, and results.
 
-Products get categories from `primaryCategoryId` (API field) mapped through `CATEGORY_BY_API_ID` in constants.js. Unmapped products (mostly in `root`) fall through `CATEGORY_FALLBACKS` which uses publisher name and ID prefix patterns. The `everything-else` API category splits by `c_isDigitalProduct` into Creature Packs (digital) vs Accessories (physical).
+## Ownership Rules
 
-### Ownership Matching
+- Items are owned by direct ID, `DB`-prefixed ID, or a configured alias.
+- Masters are fully owned by their direct ID or when all variants are owned. Partially owned masters retain tagged variants so format filtering stays accurate.
+- Sets are fully owned by their direct ID or when all children are owned. Partially owned sets retain tagged children.
+- `id-aliases.json` contains known marketplace-to-license ID mismatches.
+- A valid empty ownership response means the entire catalog is unowned; it is not an authentication error.
 
-Applied per product in `computeNotOwned`:
+## Categories and Formats
 
-- `item`: direct ID match or DB-prefix match against licensed IDs
-- `master`: same as item, plus check each variant ID
-- `set`: same as item, plus check if ALL children are owned (children tagged with `isOwned`)
-- Name fallback: if no ID match, normalized catalog name checked against license names (one direction only, min 8 chars)
+`primaryCategoryId` maps through `CATEGORY_BY_API_ID`. Unmapped products use the ordered `CATEGORY_FALLBACKS`. The `everything-else` category splits by `c_isDigitalProduct`.
 
-### Format and Publisher
-
-Each product tagged with `format` (DIGITAL, PHYSICAL, BOTH) from API fields (`c_productStyle`, `c_isDigitalProduct`, `variationAttributes`). Bundle children also tagged individually. Publisher stored from `c_publisher`, with `isFirstParty` flag from `FIRST_PARTY_PUBLISHERS` list.
-
-Popup filters by format and publisher. Bundle child counts recalculated per active format filter. Bundles hidden when all format-relevant children are owned.
-
-## Key Files
-
-- **constants.js** - `FORMAT`, `ERROR`, `STORAGE` enums. `CATEGORY_BY_API_ID` map. `CATEGORY_FALLBACKS` array. `DISPLAY_CATEGORIES` for UI. `FIRST_PARTY_PUBLISHERS`.
-- **shared.js** - `Logger` object. `endpoints` builder. `batchProcess()`, `paginateFetch()` helpers. URL constants.
-- **content.js** - `fetchCatalog()`, `resolveCategory()`, `enrichProduct()`, `computeNotOwned()`, `fetchOwnershipData()`, `runPipeline()`. Concurrency guard via `pipelineRunning` flag.
-- **popup.js** - `render()`, `matchesFormat()`, `matchesPublisher()`, filter prefs persisted in `STORAGE.FILTER_PREFS`.
+Products use `digital`, `physical`, or `both`. Master variant formats come from `variationValues`; set child formats come from `c_isDigitalProduct`.
 
 ## Conventions
 
-- All constants in `constants.js`, not scattered across files
-- Use `npm run format` and `npm run lint`, not direct tool invocation
-- Structured logging: `Logger.log('message', { key: value })` - no string interpolation
-- `const` over `let`. Arrow functions. Destructuring.
-- Storage keys via `STORAGE.*` enum, error codes via `ERROR.*`, format values via `FORMAT.*`
-- No private data (customer IDs, tokens, personal info) in source
-- Cache busted on version change (manifest.json version compared against `STORAGE.VERSION`)
-
-## D&D Beyond API
-
-Salesforce Commerce Cloud (SFCC) via `/mobify/proxy/`. Auth token from `token_DDBUS` cookie. All endpoints defined in `shared.js` `endpoints` object. Key API fields on products:
-
-| Field                 | Where                                     | What                        |
-| --------------------- | ----------------------------------------- | --------------------------- |
-| `primaryCategoryId`   | product detail                            | Category assignment         |
-| `c_productStyle`      | product detail                            | `"Digital"` or `"Physical"` |
-| `c_isDigitalProduct`  | product detail, set children              | boolean                     |
-| `c_publisher`         | product detail                            | Publisher name              |
-| `variationAttributes` | search hit (masters)                      | Digital/Physical variants   |
-| `c_productsLicensed`  | customer profile                          | Array of owned product IDs  |
-| `setProducts`         | product detail with `expand=set_products` | Bundle children             |
+- Keep pure ownership and parsing behavior in `ownership.js` and add tests for every edge case.
+- Keep shared constants in `constants.js` and HTTP endpoint builders in `shared.js`.
+- Use structured logging such as `Logger.log("message", { key: value })`.
+- Use `STORAGE.*`, `ERROR.*`, and `FORMAT.*` instead of raw values.
+- Do not commit tokens, customer IDs, licenses, order data, or other private account data.

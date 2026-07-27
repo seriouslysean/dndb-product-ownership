@@ -1,117 +1,92 @@
 # Architecture
 
-How data flows through the extension and why each piece exists.
+How data flows through the extension and why each runtime context exists.
 
-## Runtime Context
+## Runtime Contexts
 
-| Context                   | File(s)       | Capabilities                                                           | Limitations                                      |
-| ------------------------- | ------------- | ---------------------------------------------------------------------- | ------------------------------------------------ |
-| Background service worker | background.js | `chrome.cookies`, `chrome.storage`, cross-origin fetch, always running | No DOM, no DOMParser, no page context            |
-| Content script            | content.js    | Runs on marketplace pages, same-origin fetch                           | Only active when a tab is open                   |
-| Side panel                | popup.js      | DOM rendering, `chrome.storage`, `chrome.runtime.sendMessage`          | Cannot fetch marketplace APIs (extension origin) |
+| Context                   | Files                                          | Responsibilities                                      |
+| ------------------------- | ---------------------------------------------- | ----------------------------------------------------- |
+| Background service worker | `background.js` and imported modules           | Authenticated fetches, matching, caching, lifecycle   |
+| Content script            | `content.js`                                   | Read the marketplace cookie and request a sync        |
+| Side panel                | `popup.js` and imported modules                | Render storage state and apply client-side filters    |
+| Pure logic                | `ownership.js`                                 | Ownership matching, format selection, license parsing |
+| Shared definitions        | `constants.js`, `shared.js`, `id-aliases.json` | Enums, mappings, endpoints, known ID mismatches       |
 
-## Fetch Architecture
+The Manifest V3 service worker is event-driven and may stop between events. Its auth token is intentionally memory-only, while reusable results live in `chrome.storage.local`. After a worker restart, it can request the token again from an open marketplace content script.
 
-All external HTTP requests in the background service worker go through `bgFetch()`:
+The background and popup use native ES modules. The content script is standalone so it can be safely re-injected after an extension update without redeclaring shared globals.
 
-1. Resolves relative paths (e.g. `/mobify/proxy/...`) against `MARKETPLACE_BASE`
-2. Adds auth token from `chrome.cookies` (unless `auth: false`)
-3. Checks response status: 401 throws with `isAuthError`, non-ok throws with status
-4. Returns the raw `Response` object
+## Fetch Boundary
 
-`apiFetch()` wraps `bgFetch()` and parses JSON. All SFCC API calls use `apiFetch()`.
+All external HTTP requests go through `bgFetch()`:
 
-Why the background needs to resolve URLs: endpoint builders in `shared.js` return relative paths (e.g. `/mobify/proxy/api/...`). In the content script (page context), these resolve against `marketplace.dndbeyond.com`. In the background service worker, they resolve against `chrome-extension://<id>/`, which fails. `bgFetch` handles this transparently.
+1. Resolve relative marketplace paths against `MARKETPLACE_BASE`.
+2. Add the in-memory bearer token unless `auth: false`.
+3. Map a missing token to `NOT_AUTHENTICATED` and HTTP 401 to `TOKEN_EXPIRED`.
+4. Reject every other non-success response.
 
-## Pipeline Flow
+`apiFetch()` adds JSON parsing. A failing source is rejected and logged; it is never treated as a successful partial page.
 
-The pipeline runs in `background.js` and writes results to `chrome.storage.local`. The popup reads from storage and renders.
+## Pipeline
 
-```
-1. checkVersionChange()
-   - Compares manifest version against stored version
-   - If different: clears cached catalog, ownership, and results
-   - Ensures new extension versions get fresh data
+`runPipeline()` has a concurrency guard and reports each stage through `STORAGE.NOT_OWNED`.
 
-2. fetchOwnershipData()
-   - Runs 3 sources in parallel via Promise.allSettled
-   - Each source can fail independently without losing the others:
+1. **Version check**
+   - Clear the catalog, ownership, and computed result after an extension-version change.
+2. **Ownership**
+   - Reacquire the memory-only token from an open marketplace tab when necessary.
+   - On a normal sync, reuse a stored ownership array, including a valid empty array.
+   - On refresh or cache miss, run all three sources with `Promise.allSettled`.
+   - Merge and deduplicate every successful source.
+3. **Catalog**
+   - Reuse the catalog for up to one day on a normal sync.
+   - Otherwise paginate shopper search until its reported total is reached.
+   - Enrich masters/items in batches of 20 and sets in batches of 10.
+4. **Matching**
+   - Wait for `id-aliases.json` to finish loading.
+   - Run the pure `ProductOwnership.computeNotOwned()` rules.
+5. **Storage**
+   - Persist products, counts, and `lastUpdated`.
+   - Warn when local-storage usage passes 80% of the documented 10 MB quota.
 
-   a. fetchOwnershipFromApi()
-      - Reads customer ID from JWT in token_DDBUS cookie
-      - Fetches customer profile from SFCC shopper-customers API
-      - Returns c_productsLicensed (array of owned IDs)
+## Ownership Sources
 
-   b. fetchOwnershipFromLicensesPage()
-      - Fetches www.dndbeyond.com/account/licenses (HTML)
-      - Parses first <td> from each <tr> via regex (no DOMParser in service worker)
-      - Detects login redirect (no <table> in HTML)
-      - Returns array of license IDs
+| Source                  | Output                                           |
+| ----------------------- | ------------------------------------------------ |
+| Customer API            | `c_productsLicensed` IDs                         |
+| Account licenses page   | First table-cell value from each license row     |
+| Paginated order history | Every `sfccProductId` found in order group items |
 
-   c. fetchOwnershipFromOrders()
-      - Paginates through GetOrderHistory OCAPI endpoint
-      - Extracts sfccProductId from all fulfilled order items
-      - Returns array of ordered product IDs
-
-   - Merges and deduplicates all IDs
-   - Writes merged IDs to STORAGE.OWNERSHIP
-
-3. fetchCatalog()
-   - Checks daily cache (STORAGE.LAST_CATALOG_FETCH)
-   - If stale or forced: fetches all products from SFCC search API
-   - Enriches in batches:
-     - Masters + items: product details for format, category, publisher, price
-     - Sets: product details with expand=set_products for bundle children
-   - Tags new products (not in STORAGE.KNOWN_IDS) with isNew for 7 days
-   - Writes enriched catalog to STORAGE.CATALOG
-
-4. computeNotOwned()
-   - For each catalog product, checks ownership via:
-     a. Direct ID match in licensed IDs
-     b. "DB" + catalogId match
-     c. ID alias lookup (id-aliases.json)
-     d. Variant ID match (masters)
-     e. All-children-owned check (sets)
-   - Returns array of unowned products with tagged bundle children
-
-5. Write results to STORAGE.NOT_OWNED
-```
+An unavailable source returns `null`; a successful account with no products returns `[]`. This distinction prevents empty libraries from being mistaken for logged-out users.
 
 ## Triggers
 
-| Trigger                                 | What happens                                                        |
-| --------------------------------------- | ------------------------------------------------------------------- |
-| Extension installed/updated             | `onInstalled` re-injects content scripts into open marketplace tabs |
-| Background startup                      | `loadIdAliases()` then `runPipeline()`                              |
-| Content script loads (marketplace page) | Sends `refresh` message to background                               |
-| Popup refresh button                    | Sends `refresh` message to background                               |
-| Popup opens with stale FETCH_FAILED     | Sends `refresh` message to background                               |
+| Trigger                          | Behavior                                             |
+| -------------------------------- | ---------------------------------------------------- |
+| Marketplace content script loads | Normal sync; caches may be reused                    |
+| User presses Refresh             | Force ownership and catalog refetch                  |
+| Popup opens after `FETCH_FAILED` | Force one automatic retry                            |
+| Extension installs or updates    | Re-inject the standalone content script in open tabs |
 
-## Popup Rendering
+## Popup
 
-The popup never fetches data. It reads from `chrome.storage.local` and listens for changes via `chrome.storage.onChanged`.
+The popup only reads `chrome.storage.local` and listens to `chrome.storage.onChanged`. Format, publisher, category, search, and dismissed-product filters stay client-side.
 
-Filters (format, publisher, categories, search, dismissed products) are applied client-side on the stored data. Filter preferences persist in `STORAGE.FILTER_PREFS`. Dismissed product IDs persist in `STORAGE.DISMISSED`.
+Masters and sets retain ownership-tagged parts. The popup hides a partially owned product only when all parts relevant to the active format are owned.
 
-## Error States
+## Storage
 
-| Error Code          | Meaning                            | Popup behavior                                                      |
-| ------------------- | ---------------------------------- | ------------------------------------------------------------------- |
-| `NOT_AUTHENTICATED` | No auth token (not logged in)      | Shows login gate                                                    |
-| `TOKEN_EXPIRED`     | 401 from API (session expired)     | Shows login gate with "session expired"                             |
-| `FETCH_FAILED`      | Network error or non-401 API error | Shows login gate with "check connection", auto-retries on next open |
+| Key                  | Contents                                              | Lifetime                            |
+| -------------------- | ----------------------------------------------------- | ----------------------------------- |
+| `OWNERSHIP`          | Deduplicated owned IDs, including a valid empty array | Until forced refresh/version change |
+| `CATALOG`            | Enriched products and ownership parts                 | One-day cache                       |
+| `LAST_CATALOG_FETCH` | Catalog timestamp                                     | Paired with `CATALOG`               |
+| `NOT_OWNED`          | Sync stage, error, or completed result                | Replaced each pipeline run          |
+| `KNOWN_IDS`          | Product ID to first-seen timestamp                    | Persistent                          |
+| `FILTER_PREFS`       | Format, publisher, hidden categories                  | Persistent                          |
+| `DISMISSED`          | Dismissed product IDs                                 | Persistent and resettable           |
+| `VERSION`            | Last extension version that initialized caches        | Persistent                          |
 
-## Storage Keys
+## Verification
 
-All keys defined in `STORAGE` enum in `constants.js`.
-
-| Key                  | Contents                                                                     | TTL                                    |
-| -------------------- | ---------------------------------------------------------------------------- | -------------------------------------- |
-| `OWNERSHIP`          | Merged array of all owned product IDs                                        | Refreshed on pipeline run              |
-| `CATALOG`            | Enriched product array (name, format, category, price, children)             | 1 day (ONE_DAY_MS)                     |
-| `LAST_CATALOG_FETCH` | Timestamp of last catalog fetch                                              | Used for TTL check                     |
-| `NOT_OWNED`          | Pipeline result: products array + counts + timestamp, or error/syncing state | Refreshed on pipeline run              |
-| `KNOWN_IDS`          | Map of productId to first-seen timestamp                                     | Grows over time, used for "new" badges |
-| `FILTER_PREFS`       | User's format, publisher, and hidden category preferences                    | Persistent                             |
-| `DISMISSED`          | Array of product IDs the user dismissed                                      | Persistent, resettable                 |
-| `VERSION`            | Extension version string for cache busting                                   | Updated on version change              |
+`npm test` exercises the pure matching and parsing rules. `npm run lint` and `npm run format:check` validate source consistency.

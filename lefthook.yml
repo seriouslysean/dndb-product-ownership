@@ -1,6 +1,9 @@
 pre-commit:
   parallel: true
   jobs:
+    - name: test
+      run: npm test
+
     - name: lint-js
       glob: "**/*.js"
       run: npx oxlint {staged_files}

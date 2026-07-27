@@ -1,4 +1,23 @@
-importScripts("constants.js", "shared.js");
+import {
+  ERROR,
+  FIRST_PARTY_PUBLISHERS,
+  FORMAT,
+  NEW_PRODUCT_TTL_MS,
+  STORAGE,
+  STORAGE_QUOTA_BYTES,
+  STORAGE_QUOTA_WARN,
+  SYNC_STAGE,
+} from "./constants.js";
+import { ProductOwnership } from "./ownership.js";
+import {
+  LICENSES_PAGE_URL,
+  Logger,
+  MARKETPLACE_BASE,
+  ONE_DAY_MS,
+  batchProcess,
+  endpoints,
+  paginateFetch,
+} from "./shared.js";
 
 let pipelineRunning = false;
 
@@ -10,8 +29,8 @@ chrome.sidePanel
 
 // --- Auth & Fetch ---
 
-// Token is passed from content script (page context reads document.cookie).
-// Cached here so the pipeline can run without a marketplace tab.
+// The content script reads the page cookie and passes the token here.
+// Keep it in memory only and reacquire it from an open tab after worker restarts.
 let cachedAuthToken = null;
 
 const setAuthToken = (token) => {
@@ -20,6 +39,24 @@ const setAuthToken = (token) => {
 
 const getAuthToken = () => cachedAuthToken;
 
+const restoreAuthTokenFromTab = async () => {
+  if (getAuthToken()) return;
+
+  const tabs = await chrome.tabs.query({ url: `${MARKETPLACE_BASE}/*` });
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, { action: "get-auth-token" });
+      if (response?.authToken) {
+        setAuthToken(response.authToken);
+        return;
+      }
+    } catch {
+      // The tab may predate this content-script version or be navigating.
+    }
+  }
+};
+
 // All external fetches in the background go through this.
 // Resolves relative paths, adds auth, checks response status.
 const bgFetch = async (url, { auth = true, ...options } = {}) => {
@@ -27,7 +64,11 @@ const bgFetch = async (url, { auth = true, ...options } = {}) => {
 
   if (auth) {
     const token = getAuthToken();
-    if (!token) throw Object.assign(new Error("No auth token"), { isAuthError: true });
+    if (!token) {
+      throw Object.assign(new Error("No auth token"), {
+        errorCode: ERROR.NOT_AUTHENTICATED,
+      });
+    }
     options.headers = { ...options.headers, Authorization: token };
   }
 
@@ -35,7 +76,9 @@ const bgFetch = async (url, { auth = true, ...options } = {}) => {
 
   if (response.status === 401) {
     cachedAuthToken = null;
-    throw Object.assign(new Error("Token expired"), { isAuthError: true });
+    throw Object.assign(new Error("Token expired"), {
+      errorCode: ERROR.TOKEN_EXPIRED,
+    });
   }
   if (!response.ok) throw new Error(`${response.status} ${fullUrl}`);
 
@@ -55,40 +98,16 @@ const loadIdAliases = async () => {
   try {
     const url = chrome.runtime.getURL("id-aliases.json");
     const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`${resp.status} ${url}`);
     const data = await resp.json();
-    const { $schema, ...aliases } = data;
-    idAliases = aliases;
+    idAliases = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "$schema"));
     Logger.log("ID aliases loaded", { count: Object.keys(idAliases).length });
   } catch (e) {
     Logger.warn("Failed to load ID aliases", { error: e.message });
   }
 };
 
-// --- Category Resolution ---
-
-const resolveCategory = (entry, product) => {
-  if (entry.type === "set") return "Bundles";
-
-  const apiCat = CATEGORY_BY_API_ID[product.primaryCategoryId];
-  if (apiCat) return apiCat;
-
-  if (product.primaryCategoryId === "everything-else") {
-    return product.c_isDigitalProduct ? "Creature Packs" : "Accessories";
-  }
-
-  const fallback = CATEGORY_FALLBACKS.find((f) => f.test(entry));
-  if (fallback) return fallback.category;
-
-  if (
-    product.primaryCategoryId &&
-    product.primaryCategoryId !== "root" &&
-    product.primaryCategoryId !== "none"
-  ) {
-    Logger.warn("Unmapped category", { id: entry.id, category: product.primaryCategoryId });
-  }
-
-  return "Other";
-};
+const idAliasesReady = loadIdAliases();
 
 // --- Catalog Fetch ---
 
@@ -105,7 +124,13 @@ const fetchCatalog = async (forceRefresh = false) => {
   }
 
   Logger.log("Fetching product catalog");
-  const { hits = [] } = await apiFetch(endpoints.productSearch(200));
+  const hits = await paginateFetch(
+    async (offset, limit) => {
+      const page = await apiFetch(endpoints.productSearch(offset, limit));
+      return { items: page.hits || [], total: page.total };
+    },
+    { limit: 200 },
+  );
 
   const masters = [];
   const sets = [];
@@ -157,12 +182,15 @@ const fetchCatalog = async (forceRefresh = false) => {
             : FORMAT.DIGITAL;
     }
 
-    entry.category = resolveCategory(entry, product);
+    entry.category = ProductOwnership.resolveCategory(entry, product, (category) => {
+      Logger.warn("Unmapped category", { id: entry.id, category });
+    });
 
     if (entry.type === "master") {
       entry.variants = (product.variants || []).map((v) => ({
         id: v.productId,
         values: v.variationValues,
+        format: ProductOwnership.getVariantFormat(v.variationValues, entry.format),
       }));
     }
 
@@ -232,54 +260,6 @@ const fetchCatalog = async (forceRefresh = false) => {
   return catalog;
 };
 
-// --- Ownership Matching ---
-
-const isProductOwned = (productId, licensedIds) => {
-  if (licensedIds.has(productId)) return true;
-  if (licensedIds.has("DB" + productId)) return true;
-  const alias = idAliases[productId];
-  if (alias && licensedIds.has(alias)) return true;
-  return false;
-};
-
-const computeNotOwned = (catalog, { ids }) => {
-  const licensedIds = new Set(ids);
-  const owned = (id) => isProductOwned(id, licensedIds);
-  const notOwned = [];
-
-  for (const product of catalog) {
-    let isOwned = false;
-
-    if (product.type === "item") {
-      isOwned = owned(product.id);
-    } else if (product.type === "master") {
-      isOwned = owned(product.id) || (product.variants || []).some((v) => owned(v.id));
-    } else if (product.type === "set") {
-      isOwned = owned(product.id);
-
-      if (!isOwned && product.children?.length > 0) {
-        const taggedChildren = product.children.map((child) => ({
-          ...child,
-          isOwned: owned(child.id),
-        }));
-        const allOwned = taggedChildren.every((c) => c.isOwned);
-        const someOwned = taggedChildren.some((c) => c.isOwned);
-
-        if (allOwned) {
-          isOwned = true;
-        } else if (someOwned) {
-          notOwned.push({ ...product, children: taggedChildren });
-          continue;
-        }
-      }
-    }
-
-    if (!isOwned) notOwned.push(product);
-  }
-
-  return notOwned;
-};
-
 // --- Ownership Data Sources ---
 
 const getCustomerIdFromToken = () => {
@@ -299,7 +279,7 @@ const getCustomerIdFromToken = () => {
 
 const fetchOwnershipFromApi = async () => {
   const customerId = getCustomerIdFromToken();
-  if (!customerId) return [];
+  if (!customerId) return null;
   const data = await apiFetch(endpoints.customerProfile(customerId));
   return data.c_productsLicensed || [];
 };
@@ -312,26 +292,16 @@ const fetchOwnershipFromLicensesPage = async () => {
     throw new Error("Licenses page returned no table (likely login redirect)");
   }
 
-  // Service worker has no DOMParser — extract first <td> from each <tr>
-  const ids = [];
-  const rowPattern = /<tr[^>]*>\s*<td[^>]*>([^<]+)<\/td>/g;
-  let match;
-  while ((match = rowPattern.exec(html)) !== null) {
-    const id = match[1].trim();
-    if (id) ids.push(id);
-  }
-
-  return ids;
+  return ProductOwnership.extractLicenseIds(html);
 };
 
 const fetchOwnershipFromOrders = async () => {
-  if (!getAuthToken()) return [];
+  if (!getAuthToken()) return null;
 
   return paginateFetch(async (offset, limit) => {
     const response = await bgFetch(endpoints.orderHistory(offset, limit), {
       headers: { "Content-Type": "application/json" },
-    }).catch(() => null);
-    if (!response) return [];
+    });
 
     const { c_result } = await response.json();
     const ids = [];
@@ -368,19 +338,18 @@ const fetchOwnershipData = async () => {
         source: source.name,
         error: result.reason?.message,
       });
-      acc[source.name] = [];
+      acc[source.name] = null;
     }
     return acc;
   }, {});
 
-  const mergedIds = [...new Set([...resolved.api, ...resolved.licenses, ...resolved.orders])];
-
-  if (mergedIds.length === 0) return null;
+  const mergedIds = ProductOwnership.mergeSourceIds(Object.values(resolved));
+  if (!mergedIds) return null;
 
   Logger.log("Ownership data merged", {
-    api: resolved.api.length,
-    licenses: resolved.licenses.length,
-    orders: resolved.orders.length,
+    api: resolved.api?.length || 0,
+    licenses: resolved.licenses?.length || 0,
+    orders: resolved.orders?.length || 0,
     total: mergedIds.length,
   });
 
@@ -454,11 +423,12 @@ const runPipeline = async (forceRefresh = false) => {
     await setSyncStage(SYNC_STAGE.STARTING);
 
     await setSyncStage(SYNC_STAGE.OWNERSHIP);
+    await restoreAuthTokenFromTab();
     const ownershipData = shouldRefresh
       ? await fetchOwnershipData()
       : ((await loadStoredOwnership()) ?? (await fetchOwnershipData()));
 
-    if (!ownershipData?.ids?.length) {
+    if (!ownershipData) {
       await chrome.storage.local.set({
         [STORAGE.NOT_OWNED]: { errorCode: ERROR.NOT_AUTHENTICATED },
       });
@@ -469,7 +439,8 @@ const runPipeline = async (forceRefresh = false) => {
     const catalog = await fetchCatalog(shouldRefresh);
 
     await setSyncStage(SYNC_STAGE.MATCHING);
-    const notOwned = computeNotOwned(catalog, ownershipData);
+    await idAliasesReady;
+    const notOwned = ProductOwnership.computeNotOwned(catalog, ownershipData, idAliases);
 
     Logger.log("Pipeline complete", { notOwned: notOwned.length, total: catalog.length });
     await chrome.storage.local.set({
@@ -482,7 +453,7 @@ const runPipeline = async (forceRefresh = false) => {
     });
   } catch (error) {
     Logger.error("Pipeline failed", error);
-    const errorCode = error.isAuthError ? ERROR.TOKEN_EXPIRED : ERROR.FETCH_FAILED;
+    const errorCode = error.errorCode || ERROR.FETCH_FAILED;
     await chrome.storage.local.set({
       [STORAGE.NOT_OWNED]: { errorCode, errorMessage: error.message },
     });
@@ -494,7 +465,7 @@ const runPipeline = async (forceRefresh = false) => {
 
 // --- Message Handling ---
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.authToken) setAuthToken(message.authToken);
 
   if (message.action === "sync" || message.action === "refresh") {
@@ -519,17 +490,12 @@ chrome.runtime.onInstalled.addListener(async () => {
     chrome.scripting
       .executeScript({
         target: { tabId: tab.id },
-        files: ["constants.js", "shared.js", "content.js"],
+        files: ["content.js"],
       })
       .catch(() => {});
   }
 });
 
 // --- Startup ---
-
-// Load aliases immediately. Pipeline only runs when a content script
-// sends a token (marketplace page load) or popup requests a refresh.
-// On startup with no token, show cached data or NOT_AUTHENTICATED.
-loadIdAliases();
 
 Logger.log("Background script loaded");

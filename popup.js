@@ -1,4 +1,6 @@
-// constants.js and shared.js are loaded before this file
+import { DISPLAY_CATEGORIES, ERROR, FORMAT, PUBLISHER, STORAGE, SYNC_STAGE } from "./constants.js";
+import { ProductOwnership } from "./ownership.js";
+import { MARKETPLACE_BASE, endpoints } from "./shared.js";
 
 const summaryEl = document.getElementById("summary");
 const listEl = document.getElementById("product-list");
@@ -53,11 +55,7 @@ const badgeClassFor = (category) =>
 
 // --- Filters ---
 
-const matchesFormat = (product) => {
-  if (formatFilter === FORMAT.ALL) return true;
-  const f = product.format || FORMAT.DIGITAL;
-  return f === formatFilter || f === FORMAT.BOTH;
-};
+const matchesFormat = (product) => ProductOwnership.matchesFormat(product, formatFilter);
 
 const matchesPublisher = (product) => {
   if (publisherFilter === PUBLISHER.ALL) return true;
@@ -172,6 +170,7 @@ const renderToggle = (container, options, activeKey, onChange) => {
     const btn = document.createElement("button");
     btn.className = `toggle__btn${activeKey === key ? " toggle__btn--active" : ""}`;
     btn.textContent = label;
+    btn.setAttribute("aria-pressed", activeKey === key);
     btn.addEventListener("click", () => {
       onChange(key);
       saveFilterPrefs();
@@ -183,7 +182,8 @@ const renderToggle = (container, options, activeKey, onChange) => {
 
 const formatPrice = (price) => {
   if (price == null) return null;
-  return `$${Number(price).toFixed(2)}`;
+  const amount = Number(price);
+  return Number.isFinite(amount) ? `$${amount.toFixed(2)}` : null;
 };
 
 const render = (data) => {
@@ -223,17 +223,10 @@ const render = (data) => {
   const allProducts = data.products || [];
   const products = allProducts.filter((product) => {
     if (!matchesFilters(product)) return false;
-    if (product.children?.length > 0) {
-      const relevant = product.children.filter(matchesFormat);
-      if (relevant.length > 0 && relevant.every((c) => c.isOwned)) return false;
-    }
+    const relevantParts = ProductOwnership.getRelevantParts(product, formatFilter);
+    if (relevantParts.length > 0 && relevantParts.every((part) => part.isOwned)) return false;
     return true;
   });
-
-  if (allProducts.length === 0) {
-    summaryEl.textContent = `You own everything! (${data.ownedCount} of ${data.totalCatalog})`;
-    return;
-  }
 
   const groups = {};
   for (const product of products) {
@@ -243,12 +236,20 @@ const render = (data) => {
 
   renderSettings(groups, data);
 
+  if (data.lastUpdated) {
+    lastUpdatedEl.textContent = `Updated ${new Date(data.lastUpdated).toLocaleString()}`;
+  }
+
+  if (allProducts.length === 0) {
+    summaryEl.textContent = `You own everything! (${data.ownedCount} of ${data.totalCatalog})`;
+    return;
+  }
+
   if (products.length === 0) {
     summaryEl.textContent = `No matching products (${allProducts.length} total not owned)`;
     return;
   }
 
-  let visibleCount = 0;
   let hiddenCount = 0;
 
   for (const { key } of DISPLAY_CATEGORIES) {
@@ -259,8 +260,6 @@ const render = (data) => {
       hiddenCount += group.length;
       continue;
     }
-
-    visibleCount += group.length;
 
     const header = document.createElement("div");
     header.className = "product-list__header";
@@ -299,17 +298,19 @@ const render = (data) => {
         nameEl.appendChild(priceSpan);
       }
 
-      const relevantChildren = (product.children || []).filter(matchesFormat);
-      const missingChildren = relevantChildren.filter((c) => !c.isOwned);
-      const ownedCount = relevantChildren.length - missingChildren.length;
+      const relevantParts = ProductOwnership.getRelevantParts(product, formatFilter);
+      const ownedParts = relevantParts.filter((part) => part.isOwned);
 
-      if (relevantChildren.length > 0 && ownedCount > 0) {
+      if (relevantParts.length > 0 && ownedParts.length > 0) {
         const note = document.createElement("span");
         note.className = "product__note";
-        note.textContent = ` (${ownedCount}/${relevantChildren.length} owned)`;
+        note.textContent = ` (${ownedParts.length}/${relevantParts.length} owned)`;
         nameEl.appendChild(note);
       }
 
+      const missingChildren = (product.children || [])
+        .filter(matchesFormat)
+        .filter((child) => !child.isOwned);
       if (missingChildren.length > 0) {
         for (const child of missingChildren) {
           const childEl = document.createElement("div");
@@ -329,6 +330,7 @@ const render = (data) => {
       dismissBtn.className = "product__dismiss";
       dismissBtn.textContent = "\u00d7";
       dismissBtn.title = "Not interested";
+      dismissBtn.setAttribute("aria-label", `Dismiss ${product.name || "product"}`);
       dismissBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         dismissProduct(product.id);
@@ -344,10 +346,6 @@ const render = (data) => {
   const parts = [`${products.length} not owned`];
   if (hiddenCount > 0) parts.push(`${hiddenCount} hidden`);
   summaryEl.textContent = parts.join(" \u00b7 ");
-
-  if (data.lastUpdated) {
-    lastUpdatedEl.textContent = `Updated ${new Date(data.lastUpdated).toLocaleString()}`;
-  }
 };
 
 // --- Actions ---
@@ -363,6 +361,7 @@ settingsBtn.addEventListener("click", () => {
   settingsOpen = !settingsOpen;
   settingsPanel.hidden = !settingsOpen;
   settingsBtn.classList.toggle("footer__btn--active", settingsOpen);
+  settingsBtn.setAttribute("aria-expanded", settingsOpen);
 });
 
 searchInput.addEventListener("input", (e) => {

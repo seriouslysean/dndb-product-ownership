@@ -1,23 +1,28 @@
-// constants.js is loaded before this file
-
-const Logger = {
+export const Logger = {
   log: (...msgs) => console.log("[DNDBPO]:", ...msgs),
   warn: (...msgs) => console.warn("[DNDBPO]:", ...msgs),
   error: (...msgs) => console.error("[DNDBPO]:", ...msgs),
 };
 
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 const API_ORG = "f_ecom_bfst_prd";
 const API_SITE = "DDBUS";
 const API_BASE = "/mobify/proxy/api";
 const OCAPI_BASE = `/mobify/proxy/ocapi/s/${API_SITE}/dw/shop/v21_3`;
-const LICENSES_PAGE_URL = "https://www.dndbeyond.com/account/licenses";
-const MARKETPLACE_BASE = "https://marketplace.dndbeyond.com";
+export const LICENSES_PAGE_URL = "https://www.dndbeyond.com/account/licenses";
+export const MARKETPLACE_BASE = "https://marketplace.dndbeyond.com";
 
-const endpoints = {
-  productSearch: (limit = 200) =>
-    `${API_BASE}/search/shopper-search/v1/organizations/${API_ORG}/product-search?refine=cgid%3Droot&limit=${limit}&siteId=${API_SITE}`,
+export const endpoints = {
+  productSearch: (offset = 0, limit = 200) => {
+    const params = new URLSearchParams({
+      refine: "cgid=root",
+      offset,
+      limit,
+      siteId: API_SITE,
+    });
+    return `${API_BASE}/search/shopper-search/v1/organizations/${API_ORG}/product-search?${params}`;
+  },
   productDetails: (ids, expand = "") => {
     const params = new URLSearchParams({
       ids: ids.join(","),
@@ -34,10 +39,10 @@ const endpoints = {
   productPage: (productId) => `${MARKETPLACE_BASE}/category/${productId}`,
 };
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const BATCH_DELAY_MS = 300;
+export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const BATCH_DELAY_MS = 300;
 
-const batchProcess = async (items, batchSize, fetchFn) => {
+export const batchProcess = async (items, batchSize, fetchFn) => {
   const results = [];
   for (let i = 0; i < items.length; i += batchSize) {
     if (i > 0) await delay(BATCH_DELAY_MS);
@@ -47,18 +52,26 @@ const batchProcess = async (items, batchSize, fetchFn) => {
   return results;
 };
 
-const paginateFetch = async (fetchPage) => {
+export const paginateFetch = async (
+  fetchPage,
+  { limit = 100, wait = () => delay(BATCH_DELAY_MS) } = {},
+) => {
   const all = [];
   let offset = 0;
-  const limit = 100;
 
   while (true) {
-    const items = await fetchPage(offset, limit);
-    if (!items?.length) break;
+    const page = await fetchPage(offset, limit);
+    const items = Array.isArray(page) ? page : page?.items || [];
+    const total = Array.isArray(page) ? null : Number(page?.total);
+
+    if (items.length === 0) break;
     all.push(...items);
-    if (items.length < limit) break;
-    offset += limit;
-    await delay(BATCH_DELAY_MS);
+
+    const reachedEnd = Number.isFinite(total) ? all.length >= total : items.length < limit;
+    if (reachedEnd) break;
+
+    offset += items.length;
+    await wait();
   }
 
   return all;

@@ -1,23 +1,23 @@
-const FORMAT = Object.freeze({
+export const FORMAT = Object.freeze({
   DIGITAL: "digital",
   PHYSICAL: "physical",
   BOTH: "both",
   ALL: "all",
 });
 
-const PUBLISHER = Object.freeze({
+export const PUBLISHER = Object.freeze({
   ALL: "all",
   FIRST_PARTY: "first-party",
   THIRD_PARTY: "third-party",
 });
 
-const ERROR = Object.freeze({
+export const ERROR = Object.freeze({
   NOT_AUTHENTICATED: "NOT_AUTHENTICATED",
   TOKEN_EXPIRED: "TOKEN_EXPIRED",
   FETCH_FAILED: "FETCH_FAILED",
 });
 
-const STORAGE = Object.freeze({
+export const STORAGE = Object.freeze({
   OWNERSHIP: "dndbpo-product-ownership",
   CATALOG: "dndbpo-product-catalog",
   NOT_OWNED: "dndbpo-not-owned",
@@ -29,20 +29,20 @@ const STORAGE = Object.freeze({
 });
 
 // How long a product is considered "new" after first appearing in the catalog
-const NEW_PRODUCT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+export const NEW_PRODUCT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // chrome.storage.local quota is 10MB. Warn at 80%.
-const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
-const STORAGE_QUOTA_WARN = 0.8;
+export const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
+export const STORAGE_QUOTA_WARN = 0.8;
 
-const SYNC_STAGE = Object.freeze({
+export const SYNC_STAGE = Object.freeze({
   STARTING: "starting",
   OWNERSHIP: "ownership",
   CATALOG: "catalog",
   MATCHING: "matching",
 });
 
-const FIRST_PARTY_PUBLISHERS = Object.freeze([
+export const FIRST_PARTY_PUBLISHERS = Object.freeze([
   "Wizards of the Coast",
   "Wizards of the Coast & Visionary Production and Design",
 ]);
@@ -50,7 +50,7 @@ const FIRST_PARTY_PUBLISHERS = Object.freeze([
 // Maps primaryCategoryId to display category.
 // Derived from navigation tree API:
 //   GET /mobify/proxy/ocapi/s/DDBUS/dw/shop/v21_3/categories/root?levels=3&type=navigation
-const CATEGORY_BY_API_ID = Object.freeze({
+export const CATEGORY_BY_API_ID = Object.freeze({
   rulebooks: "Rulebooks",
   "core-rules": "Rulebooks",
   "expanded-rules": "Sourcebooks",
@@ -70,16 +70,19 @@ const CATEGORY_BY_API_ID = Object.freeze({
 });
 
 // Fallback for products in root/none/unmapped/campaign categories
-const CATEGORY_FALLBACKS = Object.freeze([
+export const CATEGORY_FALLBACKS = Object.freeze([
   { test: (p) => p.publisher === "Czepeku", category: "Maps" },
   { test: (p) => /^DM[A-Z0-9]/.test(p.id), category: "Maps" },
   { test: (p) => p.id.startsWith("SC"), category: "Creature Packs" },
   { test: (p) => /^DCE-|^DD\d/.test(p.id), category: "Dice" },
-  { test: (p) => !FIRST_PARTY_PUBLISHERS.includes(p.publisher), category: "Third-Party" },
+  {
+    test: (p) => Boolean(p.publisher) && !FIRST_PARTY_PUBLISHERS.includes(p.publisher),
+    category: "Third-Party",
+  },
 ]);
 
 // Display order and badge CSS classes
-const DISPLAY_CATEGORIES = Object.freeze([
+export const DISPLAY_CATEGORIES = Object.freeze([
   { key: "Rulebooks", badge: "sourcebook" },
   { key: "Sourcebooks", badge: "sourcebook" },
   { key: "Adventures", badge: "adventure" },
