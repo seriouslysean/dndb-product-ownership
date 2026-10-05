@@ -5,6 +5,7 @@ Chrome extension that shows which D&D Beyond marketplace products you don't own 
 ## Goals
 
 - Show a clear list of unowned products, filterable by format (Digital/Physical), category, and publisher
+- Treat starter packs whose listed source books are already owned as covered, while keeping them revealable
 - Cross-reference multiple ownership data sources to minimize false "not owned" results
 - Stay up to date with daily caching and version-based cache busting
 
@@ -12,18 +13,20 @@ Chrome extension that shows which D&D Beyond marketplace products you don't own 
 
 1. Download or clone this repo
 2. Run `npm install`
-3. Go to `chrome://extensions/` and enable Developer Mode
-4. Click **Load Unpacked** and select the repo folder
-5. Navigate to [marketplace.dndbeyond.com](https://marketplace.dndbeyond.com) while logged in
-6. Click the extension icon to open the side panel
+3. Run `npm run build`
+4. Go to `chrome://extensions/` and enable Developer Mode
+5. Click **Load Unpacked** and select the repo folder
+6. Navigate to [marketplace.dndbeyond.com](https://marketplace.dndbeyond.com) while logged in
+7. Click the extension icon to open the side panel
 
 ## Usage
 
 - The extension syncs automatically when you visit the marketplace
 - Click the extension icon to open the side panel
-- Use the format toggle (Digital / Physical / All) to filter by product type
-- Use the publisher toggle (Official / Third-Party / All) to filter by publisher
-- Click category chips to hide/show groups (preferences persist)
+- Use **First-party digital** for the ownership-audit view
+- Open the filter menu for format, publisher, and category controls
+- Expand or collapse category sections individually or all at once
+- Audit totals continue to count hidden and dismissed products
 - Click any product to open its marketplace page
 - Hit **Refresh** to re-sync from all sources
 
@@ -31,11 +34,13 @@ Chrome extension that shows which D&D Beyond marketplace products you don't own 
 
 ```bash
 npm test
+npm run typecheck
 npm run lint
 npm run format:check
+npm run build
 ```
 
-The extension is buildless. Runtime code uses native ES modules, and the ownership rules are covered by Node's built-in test runner.
+The side panel uses Vue 3, TypeScript, and Vite. Pure ownership rules use Node's test runner, and side-panel behavior uses Vitest with jsdom. Lefthook runs the full local quality gate before commits.
 
 ## Documentation
 

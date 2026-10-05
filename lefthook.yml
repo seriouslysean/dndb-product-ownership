@@ -4,25 +4,23 @@ pre-commit:
     - name: test
       run: npm test
 
-    - name: lint-js
-      glob: "**/*.js"
-      run: npx oxlint {staged_files}
+    - name: typecheck
+      run: npm run typecheck
 
-    - name: format-js
-      glob: "**/*.js"
-      run: npx oxfmt --check {staged_files}
+    - name: build
+      run: npm run build
 
-    - name: format-md
-      glob: "**/*.md"
-      run: npx oxfmt --check {staged_files}
+    - name: lint-code
+      glob: "**/*.{js,ts,vue}"
+      run: npx oxlint --vue-plugin {staged_files}
 
-    - name: format-json
-      glob: "**/*.json"
+    - name: format
+      glob: "**/*.{css,html,js,json,md,ts,vue,yml}"
       exclude:
         - "node_modules/**"
         - "package-lock.json"
       run: npx oxfmt --check {staged_files}
 
     - name: lint-css
-      glob: "**/*.css"
+      glob: "src/**/*.css"
       run: npx stylelint {staged_files}

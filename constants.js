@@ -25,6 +25,7 @@ export const STORAGE = Object.freeze({
   FILTER_PREFS: "dndbpo-filter-prefs",
   DISMISSED: "dndbpo-dismissed",
   KNOWN_IDS: "dndbpo-known-ids",
+  CATEGORY_INFERENCES: "dndbpo-category-inferences",
   VERSION: "dndbpo-version",
 });
 
@@ -85,6 +86,7 @@ export const CATEGORY_FALLBACKS = Object.freeze([
 export const DISPLAY_CATEGORIES = Object.freeze([
   { key: "Rulebooks", badge: "sourcebook" },
   { key: "Sourcebooks", badge: "sourcebook" },
+  { key: "Character Options", badge: "sourcebook" },
   { key: "Adventures", badge: "adventure" },
   { key: "Campaign Settings", badge: "adventure" },
   { key: "Dice", badge: "dice" },

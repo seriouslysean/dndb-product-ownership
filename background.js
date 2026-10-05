@@ -1,6 +1,5 @@
 import {
   ERROR,
-  FIRST_PARTY_PUBLISHERS,
   FORMAT,
   NEW_PRODUCT_TTL_MS,
   STORAGE,
@@ -32,6 +31,7 @@ chrome.sidePanel
 // The content script reads the page cookie and passes the token here.
 // Keep it in memory only and reacquire it from an open tab after worker restarts.
 let cachedAuthToken = null;
+let authRefreshPromise = null;
 
 const setAuthToken = (token) => {
   cachedAuthToken = token;
@@ -39,40 +39,66 @@ const setAuthToken = (token) => {
 
 const getAuthToken = () => cachedAuthToken;
 
-const restoreAuthTokenFromTab = async () => {
-  if (getAuthToken()) return;
+const restoreAuthTokenFromTab = async ({ force = false, rejectedToken = null } = {}) => {
+  if (!force && getAuthToken()) return getAuthToken();
 
   const tabs = await chrome.tabs.query({ url: `${MARKETPLACE_BASE}/*` });
   for (const tab of tabs) {
     if (!tab.id) continue;
     try {
       const response = await chrome.tabs.sendMessage(tab.id, { action: "get-auth-token" });
-      if (response?.authToken) {
+      if (response?.authToken && response.authToken !== rejectedToken) {
         setAuthToken(response.authToken);
-        return;
+        return response.authToken;
       }
     } catch {
       // The tab may predate this content-script version or be navigating.
     }
   }
+
+  return null;
+};
+
+const refreshAuthTokenFromTab = (rejectedToken) => {
+  if (!authRefreshPromise) {
+    authRefreshPromise = restoreAuthTokenFromTab({ force: true, rejectedToken }).finally(() => {
+      authRefreshPromise = null;
+    });
+  }
+  return authRefreshPromise;
 };
 
 // All external fetches in the background go through this.
 // Resolves relative paths, adds auth, checks response status.
 const bgFetch = async (url, { auth = true, ...options } = {}) => {
   const fullUrl = url.startsWith("/") ? `${MARKETPLACE_BASE}${url}` : url;
+  let authToken = null;
 
   if (auth) {
-    const token = getAuthToken();
-    if (!token) {
+    authToken = getAuthToken();
+    if (!authToken) {
       throw Object.assign(new Error("No auth token"), {
         errorCode: ERROR.NOT_AUTHENTICATED,
       });
     }
-    options.headers = { ...options.headers, Authorization: token };
   }
 
-  const response = await fetch(fullUrl, options);
+  const request = (token) =>
+    fetch(fullUrl, {
+      ...options,
+      headers: auth ? { ...options.headers, Authorization: token } : options.headers,
+    });
+
+  let response = await request(authToken);
+
+  if (auth && response.status === 401) {
+    cachedAuthToken = null;
+    const refreshedToken = await refreshAuthTokenFromTab(authToken);
+    if (refreshedToken) {
+      authToken = refreshedToken;
+      response = await request(authToken);
+    }
+  }
 
   if (response.status === 401) {
     cachedAuthToken = null;
@@ -168,18 +194,13 @@ const fetchCatalog = async (forceRefresh = false) => {
   }
 
   const enrichProduct = (entry, product) => {
-    entry.publisher = product.c_publisher || null;
-    entry.isFirstParty = FIRST_PARTY_PUBLISHERS.includes(entry.publisher);
+    entry.publisher = ProductOwnership.resolvePublisher(product);
+    entry.isFirstParty = ProductOwnership.isFirstPartyPublisher(entry.publisher);
     entry.primaryCategoryId = product.primaryCategoryId || null;
     entry.price = product.c_salePrice ?? product.price ?? null;
 
     if (!entry.format) {
-      entry.format =
-        product.c_productStyle === "Physical"
-          ? FORMAT.PHYSICAL
-          : product.c_isDigitalProduct === false
-            ? FORMAT.PHYSICAL
-            : FORMAT.DIGITAL;
+      entry.format = ProductOwnership.resolveProductFormat(product);
     }
 
     entry.category = ProductOwnership.resolveCategory(entry, product, (category) => {
@@ -198,8 +219,12 @@ const fetchCatalog = async (forceRefresh = false) => {
       entry.children = product.setProducts.map((sp) => ({
         id: sp.id,
         name: sp.name,
-        format: sp.c_isDigitalProduct === false ? FORMAT.PHYSICAL : FORMAT.DIGITAL,
+        format: ProductOwnership.resolveProductFormat(sp, entry.format),
       }));
+      entry.children = ProductOwnership.resolveBundleComponents(entry.children, [
+        ...masters,
+        ...items,
+      ]);
       const hasDigitalChild = entry.children.some((c) => c.format === FORMAT.DIGITAL);
       const hasPhysicalChild = entry.children.some((c) => c.format === FORMAT.PHYSICAL);
       entry.format =
@@ -235,6 +260,73 @@ const fetchCatalog = async (forceRefresh = false) => {
   }
 
   const catalog = [...masters, ...sets, ...items];
+
+  const contextualFirstParty = catalog.filter(
+    (entry) =>
+      entry.isFirstParty &&
+      (entry.category === "Other" || /\b(?:class|species) starter pack\b/i.test(entry.name || "")),
+  );
+  const storedInferences = await chrome.storage.local.get(STORAGE.CATEGORY_INFERENCES);
+  const categoryInferences = storedInferences[STORAGE.CATEGORY_INFERENCES] || {};
+  const needsContext = [];
+
+  for (const entry of contextualFirstParty) {
+    const cached = categoryInferences[entry.id];
+    if (cached?.category && cached?.reason) {
+      entry.category = cached.category;
+      entry.categorySource = "page-context-cache";
+      entry.categoryReason = cached.reason;
+      if (Array.isArray(cached.coverageSources)) {
+        entry.coverageSources = cached.coverageSources;
+      }
+    } else {
+      needsContext.push(entry);
+    }
+  }
+
+  let inferencesChanged = false;
+  for (const { data } of await batchProcess(needsContext, 4, (batch) =>
+    Promise.all(
+      batch.map(async (entry) => {
+        try {
+          const response = await bgFetch(entry.url, {
+            auth: false,
+            credentials: "omit",
+          });
+          const context = ProductOwnership.extractProductPageContext(await response.text());
+          const inference = ProductOwnership.inferCategoryFromContext(entry, context || {});
+          const coverageSources = Array.isArray(context?.contentSources)
+            ? context.contentSources
+            : [];
+          return { entry, inference, coverageSources };
+        } catch (error) {
+          Logger.warn("Product classification context failed", {
+            id: entry.id,
+            error: error.message,
+          });
+          return { entry, inference: null, coverageSources: [] };
+        }
+      }),
+    ),
+  )) {
+    for (const { entry, inference, coverageSources } of data) {
+      if (!inference) continue;
+      entry.category = inference.category;
+      entry.categorySource = "page-context";
+      entry.categoryReason = inference.reason;
+      if (coverageSources.length > 0) entry.coverageSources = coverageSources;
+      categoryInferences[entry.id] = {
+        ...inference,
+        ...(coverageSources.length > 0 ? { coverageSources } : {}),
+      };
+      inferencesChanged = true;
+    }
+  }
+  if (inferencesChanged) {
+    await chrome.storage.local.set({
+      [STORAGE.CATEGORY_INFERENCES]: categoryInferences,
+    });
+  }
 
   // Tag new products
   const stored = await chrome.storage.local.get(STORAGE.KNOWN_IDS);
@@ -373,6 +465,7 @@ const checkVersionChange = async () => {
       STORAGE.LAST_CATALOG_FETCH,
       STORAGE.OWNERSHIP,
       STORAGE.NOT_OWNED,
+      STORAGE.CATEGORY_INFERENCES,
     ]);
     await chrome.storage.local.set({ [STORAGE.VERSION]: currentVersion });
     return true;
@@ -440,9 +533,23 @@ const runPipeline = async (forceRefresh = false) => {
 
     await setSyncStage(SYNC_STAGE.MATCHING);
     await idAliasesReady;
-    const notOwned = ProductOwnership.computeNotOwned(catalog, ownershipData, idAliases);
+    const unresolvedOwnership = ProductOwnership.computeNotOwned(
+      catalog,
+      ownershipData,
+      idAliases,
+    );
+    const notOwned = ProductOwnership.markCoveredProducts(
+      catalog,
+      unresolvedOwnership,
+      ownershipData,
+      idAliases,
+    );
 
-    Logger.log("Pipeline complete", { notOwned: notOwned.length, total: catalog.length });
+    Logger.log("Pipeline complete", {
+      covered: notOwned.filter((product) => product.isCovered).length,
+      notOwned: notOwned.length,
+      total: catalog.length,
+    });
     await chrome.storage.local.set({
       [STORAGE.NOT_OWNED]: {
         products: notOwned,
@@ -466,7 +573,7 @@ const runPipeline = async (forceRefresh = false) => {
 // --- Message Handling ---
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.authToken) setAuthToken(message.authToken);
+  if (Object.hasOwn(message, "authToken")) setAuthToken(message.authToken || null);
 
   if (message.action === "sync" || message.action === "refresh") {
     const forceRefresh = message.action === "refresh";
@@ -499,3 +606,10 @@ chrome.runtime.onInstalled.addListener(async () => {
 // --- Startup ---
 
 Logger.log("Background script loaded");
+
+export const BackgroundTesting = Object.freeze({
+  bgFetch,
+  getAuthToken,
+  restoreAuthTokenFromTab,
+  setAuthToken,
+});

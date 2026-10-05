@@ -4,19 +4,21 @@ Guidance for working in this repository.
 
 ## What This Is
 
-A buildless Chrome Manifest V3 extension that shows which D&D Beyond marketplace products the signed-in user does not fully own. Its side panel supports format, category, publisher, and text filters. Three ownership sources are merged to reduce false positives.
+A Chrome Manifest V3 extension that shows which D&D Beyond marketplace products the signed-in user does not fully own. Its Vue side panel supports audit scopes, format, category, publisher, text, and accordion controls. Three ownership sources are merged to reduce false positives.
 
 ## Commands
 
 ```bash
 npm test              # ownership and parsing tests
-npm run lint          # oxlint (JS) + stylelint (CSS)
+npm run typecheck     # Vue and TypeScript diagnostics
+npm run lint          # oxlint (JS/TS/Vue) + stylelint (CSS)
 npm run lint:fix      # auto-fix lint issues
 npm run format        # oxfmt --write
 npm run format:check  # oxfmt --check
+npm run build         # Vite production bundle
 ```
 
-Lefthook runs tests, JS/Markdown/JSON formatting, and JS/CSS linting before commits.
+Lefthook runs tests, type checking, the Vite build, Oxfmt, Oxlint, and Stylelint before commits.
 
 ## Architecture
 
@@ -26,10 +28,10 @@ shared.js     → logging, URLs, endpoint builders, batch helpers
 ownership.js  → pure ownership, format, and license-parsing rules
 content.js    → reads the marketplace auth cookie and requests a sync
 background.js → fetch pipeline and extension lifecycle
-popup.js      → side-panel filters and rendering
+src/popup/    → Vue/TypeScript side-panel model, components, and styles
 ```
 
-There is no build step. The background service worker and popup use native ES modules. The isolated content script is a standalone classic script.
+Vite builds the side panel to `dist/popup.html`. The background service worker uses native ES modules, and the isolated content script is a standalone classic script.
 
 ### Data Flow
 
@@ -37,7 +39,7 @@ There is no build step. The background service worker and popup use native ES mo
 2. The background merges ownership IDs from the customer API, licenses page, and paginated order history.
 3. It fetches the complete paginated catalog and enriches products in detail batches.
 4. `ownership.js` matches direct IDs, `DB`-prefixed IDs, aliases, master variants, and set children.
-5. The result is stored under `STORAGE.NOT_OWNED`; the popup renders storage changes.
+5. The result is stored under `STORAGE.NOT_OWNED`; the Vue side panel renders storage changes.
 
 Catalog and ownership caches are reused during automatic sync. The Refresh button forces all sources and the catalog to refetch. A manifest-version change invalidates cached catalog, ownership, and results.
 
@@ -51,13 +53,14 @@ Catalog and ownership caches are reused during automatic sync. The Refresh butto
 
 ## Categories and Formats
 
-`primaryCategoryId` maps through `CATEGORY_BY_API_ID`. Unmapped products use the ordered `CATEGORY_FALLBACKS`. The `everything-else` category splits by `c_isDigitalProduct`.
+`primaryCategoryId` maps through `CATEGORY_BY_API_ID`. Unmapped products use the ordered `CATEGORY_FALLBACKS`, then unresolved first-party products use conservative inference over public product-page JSON-LD. The `everything-else` category splits by `c_isDigitalProduct`.
 
 Products use `digital`, `physical`, or `both`. Master variant formats come from `variationValues`; set child formats come from `c_isDigitalProduct`.
 
 ## Conventions
 
 - Keep pure ownership and parsing behavior in `ownership.js` and add tests for every edge case.
+- Keep side-panel filtering rules in `src/popup/model.ts` and UI behavior in small Vue components.
 - Keep shared constants in `constants.js` and HTTP endpoint builders in `shared.js`.
 - Use structured logging such as `Logger.log("message", { key: value })`.
 - Use `STORAGE.*`, `ERROR.*`, and `FORMAT.*` instead of raw values.

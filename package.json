@@ -1,6 +1,6 @@
 {
   "name": "dndb-product-ownership",
-  "version": "1.3.0",
+  "version": "1.4.5",
   "private": true,
   "description": "Chrome extension that shows which D&D Beyond marketplace products you don't own yet.",
   "homepage": "https://github.com/seriouslysean/dndb-product-ownership#readme",
@@ -14,17 +14,34 @@
   },
   "type": "module",
   "scripts": {
-    "test": "node --test",
-    "lint": "oxlint . && stylelint '*.css'",
-    "lint:fix": "oxlint --fix . && stylelint --fix '*.css'",
-    "format": "oxfmt --write '**/*.js' '**/*.md' '**/*.json'",
-    "format:check": "oxfmt --check '**/*.js' '**/*.md' '**/*.json'"
+    "build": "vite build",
+    "test": "node --test tests/*.test.js && vitest run",
+    "test:core": "node --test tests/*.test.js",
+    "test:ui": "vitest run",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "oxlint --vue-plugin . && stylelint 'src/**/*.css'",
+    "lint:fix": "oxlint --vue-plugin --fix . && stylelint --fix 'src/**/*.css'",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check ."
+  },
+  "dependencies": {
+    "vue": "^3.5.40"
   },
   "devDependencies": {
+    "@types/chrome": "^0.2.2",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "jsdom": "^29.1.1",
     "lefthook": "^1.13.6",
     "oxfmt": "^0.60.0",
     "oxlint": "^1.75.0",
     "stylelint": "^17.14.1",
-    "stylelint-config-standard": "^40.0.0"
+    "stylelint-config-standard": "^40.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.8"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }
