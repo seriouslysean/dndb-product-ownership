@@ -21,7 +21,7 @@
     "format:check": "oxfmt --check '**/*.js' '**/*.md' '**/*.json'"
   },
   "devDependencies": {
-    "lefthook": "^1.13.6",
+    "lefthook": "^2.2.2",
     "oxfmt": "^0.73.0",
     "oxlint": "^1.88.0",
     "stylelint": "^17.16.0",
