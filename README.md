@@ -11,7 +11,7 @@ Chrome extension that shows which D&D Beyond marketplace products you don't own 
 ## Install
 
 1. Download or clone this repo
-2. Run `npm install`
+2. Run `npm ci`
 3. Go to `chrome://extensions/` and enable Developer Mode
 4. Click **Load Unpacked** and select the repo folder
 5. Navigate to [marketplace.dndbeyond.com](https://marketplace.dndbeyond.com) while logged in
