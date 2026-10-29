@@ -57,7 +57,8 @@ Products use `digital`, `physical`, or `both`. Master variant formats come from 
 
 ## Conventions
 
-- Keep pure ownership and parsing behavior in `ownership.js` and add tests for every edge case.
+- Keep pure ownership and parsing behavior in `ownership.js`.
+- Before writing or changing a test, read https://github.com/splitleafhq/.github/blob/main/docs/testing.md.
 - Keep shared constants in `constants.js` and HTTP endpoint builders in `shared.js`.
 - Use structured logging such as `Logger.log("message", { key: value })`.
 - Use `STORAGE.*`, `ERROR.*`, and `FORMAT.*` instead of raw values.
