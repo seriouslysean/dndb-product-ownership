@@ -16,7 +16,7 @@ npm run format        # oxfmt --write
 npm run format:check  # oxfmt --check
 ```
 
-Lefthook runs tests, JS/Markdown/JSON formatting, and JS/CSS linting before commits.
+Lefthook runs tests, JS/Markdown/JSON formatting, and JS/CSS linting before commits, and the CI checks (`npm test`, `npm run lint`, `npm run format:check`) before every push. `npm ci` installs the hooks.
 
 ## Architecture
 
