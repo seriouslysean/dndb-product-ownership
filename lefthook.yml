@@ -26,3 +26,11 @@ pre-commit:
     - name: lint-css
       glob: "**/*.css"
       run: npx stylelint {staged_files}
+
+pre-push:
+  jobs:
+    - name: ci
+      # git sets repo-local variables for a hook; from a linked worktree GIT_DIR in them breaks the git that tools run.
+      run: |
+        unset $(git rev-parse --local-env-vars)
+        npm test && npm run lint && npm run format:check
