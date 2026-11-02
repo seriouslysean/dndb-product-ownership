@@ -44,25 +44,6 @@ jobs:
       - run: npm ci
       - run: npm test
 
-  # Required by the ruleset today. Kept, with its steps, until lint and test are
-  # required instead; the follow-up pull request deletes it.
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          check-latest: true
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run lint
-      - run: npm run format:check
-
   # Squash-merges a Dependabot PR once the jobs above pass, if the update is a
   # patch or minor: GitHub's documented pattern (dependabot/fetch-metadata, then
   # gh pr merge), pinned to the head that was checked. Majors and anything not
@@ -70,7 +51,7 @@ jobs:
   # this merges before it finishes.
   automerge:
     name: 'Dependabot auto-merge'
-    needs: [validate, lint, test]
+    needs: [lint, test]
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
