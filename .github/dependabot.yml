@@ -19,6 +19,10 @@ updates:
       prefix: chore
       include: scope
     groups:
+      # stylelint and its shared configs require each other's majors, so they move in one PR. A dependency joins the
+      # first group it matches, so this sits before the catch-all.
+      stylelint:
+        patterns: ["stylelint", "stylelint-*"]
       npm:
         patterns: ["*"]
         update-types: [minor, patch]
