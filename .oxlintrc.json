@@ -1,5 +1,8 @@
 {
   "rules": {
     "no-unused-vars": "error"
+  },
+  "options": {
+    "denyWarnings": true
   }
 }
